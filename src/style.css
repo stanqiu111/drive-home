@@ -210,3 +210,24 @@ kbd {
 #board-list li.me { color: #7dff9a; }
 #board-list li.dim { list-style: none; margin-left: -22px; opacity: 0.7; }
 .screen.corner .card { max-height: calc(100vh - 32px); overflow-y: auto; }
+
+/* Achievements */
+#achievements { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; margin-bottom: 14px; }
+.ach { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); text-align: left; }
+.ach.got { border-color: rgba(125,255,154,0.5); background: rgba(125,255,154,0.08); }
+.ach .ico { font-size: 22px; filter: grayscale(1); opacity: 0.4; }
+.ach.got .ico { filter: none; opacity: 1; }
+.ach > div { flex: 1; min-width: 0; }
+.ach b { display: block; font-size: 14px; }
+.ach small { display: block; font-size: 12px; opacity: 0.7; }
+.ach .bar { height: 5px; margin-top: 5px; border-radius: 3px; background: rgba(255,255,255,0.12); overflow: hidden; }
+.ach .bar em { display: block; height: 100%; background: linear-gradient(90deg, #ffb347, #ff6a3d); }
+.ach.got .bar em { background: #7dff9a; }
+.ach .count { font-size: 13px; font-weight: 700; opacity: 0.85; }
+.tile.locked { opacity: 0.55; filter: grayscale(0.7); }
+#achieve {
+  position: fixed; top: 92px; left: 50%; transform: translate(-50%, -20px); z-index: 30; pointer-events: none;
+  padding: 12px 22px; border-radius: 999px; background: linear-gradient(90deg, #ffcf5a, #ff7a3d); color: #1a1020;
+  font-weight: 800; font-size: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.35); opacity: 0; transition: opacity 0.3s, transform 0.3s;
+}
+#achieve.show { opacity: 1; transform: translate(-50%, 0); }

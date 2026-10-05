@@ -21,3 +21,27 @@ create policy "read scores" on public.scores for select to anon, authenticated u
 
 drop policy if exists "add scores" on public.scores;
 create policy "add scores" on public.scores for insert to anon, authenticated with check (true);
+
+-- Per-player achievements and stats. Each browser signs in anonymously
+-- (Authentication → Sign In / Providers → "Allow anonymous sign-ins" must be ON),
+-- and can only see and change its own row.
+create table if not exists public.player_progress (
+  user_id uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  stats jsonb not null default '{}'::jsonb check (pg_column_size(stats) < 4000),
+  achievements text[] not null default '{}' check (cardinality(achievements) <= 50),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.player_progress enable row level security;
+
+drop policy if exists "read own progress" on public.player_progress;
+create policy "read own progress" on public.player_progress for select to authenticated
+  using ((select auth.uid()) = user_id);
+
+drop policy if exists "add own progress" on public.player_progress;
+create policy "add own progress" on public.player_progress for insert to authenticated
+  with check ((select auth.uid()) = user_id);
+
+drop policy if exists "update own progress" on public.player_progress;
+create policy "update own progress" on public.player_progress for update to authenticated
+  using ((select auth.uid()) = user_id) with check ((select auth.uid()) = user_id);

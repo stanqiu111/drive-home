@@ -7,18 +7,19 @@ import { Signals } from './signals.js';
 import { Collectibles, makeNitroCan } from './pickups.js';
 import { POWERS, randomPower, makeMysteryBox, PowerVisuals } from './powers.js';
 import { leaderboardEnabled, topScores, submitScore } from './leaderboard.js';
+import { progress, ACHIEVEMENTS } from './progress.js';
 import { Effects } from './effects.js';
 import { Ending } from './ending.js';
 import { buildFun, FUN_RIDES, FUN_IDS } from './funrides.js';
 import { readInput, setupTouch, isTouch } from './input.js';
 
 const MAPS = [
-  { id: 'home', name: 'Downtown', sub: 'Home · Gateway Blvd & Walterdale Bridge', km: 15.6, cheer: 'FINALLY HOME!!' },
-  { id: 'windermere', name: 'Windermere', sub: 'West along Ellerslie Rd', km: 11.3, cheer: 'MADE IT!!' },
-  { id: 'sherwood', name: 'Sherwood Park', sub: 'Anthony Henday, east', km: 22.2, cheer: 'MADE IT!!' },
-  { id: 'burger', name: 'Odd Burger', sub: 'Quick burger run on Ellerslie Rd', km: 1.5, cheer: 'BURGER TIME!!' },
-  { id: 'beachclub', name: 'Summerside Beach Club', sub: 'Residents’ lake club, around the corner', km: 1.6, cheer: 'BEACH DAY!!' },
-  { id: 'noodle', name: 'Noodle Feast', sub: 'Parsons Place, up 99 St', km: 7.1, cheer: 'NOODLE TIME!!' },
+  { id: 'home', name: 'Downtown', sub: 'Home · Gateway Blvd & Walterdale Bridge', km: 15.6, cheer: 'FINALLY HOME!!', ending: 'game' },
+  { id: 'windermere', name: 'Windermere', sub: 'West along Ellerslie Rd', km: 11.3, cheer: 'MADE IT!!', ending: 'shopping' },
+  { id: 'sherwood', name: 'Sherwood Park', sub: 'Anthony Henday, east', km: 22.2, cheer: 'MADE IT!!', ending: 'bbq' },
+  { id: 'burger', name: 'Odd Burger', sub: 'Quick burger run on Ellerslie Rd', km: 1.5, cheer: 'MADE IT!!', ending: 'burger' },
+  { id: 'beachclub', name: 'Summerside Beach Club', sub: 'Residents’ lake club, around the corner', km: 1.6, cheer: 'MADE IT!!', ending: 'beach' },
+  { id: 'noodle', name: 'Noodle Feast', sub: 'Parsons Place, up 99 St', km: 7.1, cheer: 'MADE IT!!', ending: 'noodle' },
 ];
 
 const BASE_SPEED = 45; // m/s ≈ 162 km/h before car stats
@@ -61,10 +62,18 @@ const mysteryBoxes = new Collectibles(scene, makeMysteryBox, {
 const ending = new Ending(scene);
 
 // --- Preferences ---
+// Locked rides (the Rocket) need every achievement first.
+const carAvailable = (id) => !FUN_RIDES[id]?.locked || progress.rocketUnlocked;
+
 function loadPrefs() {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY));
-    if (p && MAPS.some((m) => m.id === p.map) && (CAR_MODELS[p.car] || FUN_RIDES[p.car])) return { colors: {}, ...p };
+    if (p) {
+      const out = { map: 'home', car: 'modelx', colors: {}, ...p };
+      if (!MAPS.some((m) => m.id === out.map)) out.map = 'home';
+      if (!CAR_MODELS[out.car] && !(FUN_RIDES[out.car] && carAvailable(out.car))) out.car = 'modelx';
+      return out;
+    }
   } catch { /* fall through */ }
   return { map: 'home', car: 'modelx', colors: {} };
 }
@@ -120,6 +129,12 @@ const flameGeo = new THREE.ConeGeometry(0.18, 1.2, 8).rotateX(Math.PI / 2);
 function selectCar(id) {
   const model = modelOf(id);
   if (!model) return;
+  if (!carAvailable(id)) {
+    const done = progress.data.achievements.length;
+    toast(`🔒 Earn all achievements (${done}/${ACHIEVEMENTS.length})`, 'crash');
+    document.getElementById('achievements')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    return;
+  }
   prefs.car = id;
   savePrefs();
   stats = model.stats;
@@ -160,7 +175,7 @@ async function selectMap(id) {
     traffic.setWorld(route, signals);
     nitroCans.setRoute(route);
     mysteryBoxes.setRoute(route);
-    ending.setRoute(route, world.heightAt, mapInfo().cheer);
+    ending.setRoute(route, world.heightAt, mapInfo().cheer, mapInfo().ending);
     ui.credits.textContent = data.credits;
     reset();
     S.mode = 'menu';
@@ -188,11 +203,14 @@ function renderMenu() {
       <span>${c.desc}</span></button>`;
   }).join('') + FUN_IDS.map((id) => {
     const f = FUN_RIDES[id];
-    return `<button class="tile car fun ${id === prefs.car ? 'sel' : ''}" data-car="${id}">
-      <small>Fun ride</small><b>${f.name}</b>
+    const locked = !carAvailable(id);
+    const desc = f.locked && !locked ? '259 km/h and smashes straight through traffic' : f.desc;
+    return `<button class="tile car fun ${id === prefs.car ? 'sel' : ''} ${locked ? 'locked' : ''}" data-car="${id}">
+      <small>${f.locked ? (locked ? '🔒 Locked' : '🚀 Unlocked') : 'Fun ride'}</small><b>${f.name}</b>
       ${bar('Speed', f.stats.top)}${bar('Accel', f.stats.accel)}${bar('Grip', f.stats.grip)}
-      <span>${f.desc}</span></button>`;
+      <span>${desc}</span></button>`;
   }).join('');
+  renderAchievements();
   if (FUN_RIDES[prefs.car]) {
     ui.paint.innerHTML = '';
     return;
@@ -203,6 +221,50 @@ function renderMenu() {
     return `<button class="swatch ${p === current ? 'sel' : ''}" data-paint="${p}" style="background:${hex}" aria-label="Paint ${hex}"></button>`;
   }).join('');
 }
+
+function renderAchievements() {
+  const done = progress.data.achievements.length;
+  $('achievements').innerHTML = ACHIEVEMENTS.map((a) => {
+    const v = progress.value(a);
+    const got = progress.unlocked.has(a.id);
+    return `<div class="ach ${got ? 'got' : ''}">
+      <span class="ico">${a.icon}</span>
+      <div><b>${a.name}</b><small>${a.desc}</small>
+        <div class="bar"><em style="width:${(v / a.goal) * 100}%"></em></div></div>
+      <span class="count">${got ? '✓' : `${v}/${a.goal}`}</span></div>`;
+  }).join('');
+  $('ach-summary').textContent = progress.rocketUnlocked
+    ? '🚀 Rocket unlocked!'
+    : `${done}/${ACHIEVEMENTS.length} done · finish them all to unlock the 🚀 Rocket${progress.online ? '' : ' · saved on this device'}`;
+}
+
+// Achievement pop-ups, one after another.
+const achQueue = [];
+let achBusy = false;
+function popAchievement(text) {
+  achQueue.push(text);
+  if (achBusy) return;
+  achBusy = true;
+  const next = () => {
+    const t = achQueue.shift();
+    if (!t) {
+      achBusy = false;
+      return;
+    }
+    $('achieve').textContent = t;
+    $('achieve').classList.add('show');
+    setTimeout(() => {
+      $('achieve').classList.remove('show');
+      setTimeout(next, 350);
+    }, 2600);
+  };
+  next();
+}
+progress.onChange((fresh) => {
+  for (const a of fresh) popAchievement(`🏅 ${a.icon} ${a.name}!`);
+  if (fresh.length && progress.rocketUnlocked) popAchievement('🚀 ROCKET UNLOCKED! Pick it in the garage');
+  if (S.mode === 'menu') renderMenu();
+});
 
 ui.mapList.addEventListener('click', (e) => {
   const id = e.target.closest('[data-map]')?.dataset.map;
@@ -268,6 +330,7 @@ function finish() {
   S.x = 1000; // out of the traffic's way during the cutscene
   if (player.userData.rider) player.userData.rider.visible = false; // the rider hops off
   setBanner(false); // already driven under it; it would block the ending shot
+  progress.finishTrip(prefs.map);
   ending.start();
 }
 
@@ -368,6 +431,7 @@ function smash(c) {
   const p = c.mesh.position;
   effects.explode(p.x, p.y + 1, p.z, 20);
   S.smashed++;
+  if (S.mode === 'race') progress.add('smashed');
 }
 
 function blast() {
@@ -452,7 +516,7 @@ function checkCollisions() {
     const ds = S.s - c.s;
     if (Math.abs(dx) >= (S.width + 2) * 0.46 || Math.abs(ds) >= (S.len + c.len) * 0.46) continue;
 
-    if (S.power === 'shield' || S.power === 'turbo') {
+    if (S.power === 'shield' || S.power === 'turbo' || modelOf(prefs.car).smasher) {
       smash(c);
       S.shake = Math.max(S.shake, 0.3);
       continue;
@@ -497,7 +561,7 @@ function updateFx(t) {
   const turbo = S.power === 'turbo';
   flameMat.color.set(turbo ? 0xff7a2a : 0x5fd4ff);
   for (const f of flames) {
-    f.visible = S.boosting || turbo;
+    f.visible = S.boosting || turbo || Boolean(modelOf(prefs.car).flame);
     f.scale.z = (turbo ? 1.6 : 0.8) + Math.random() * 0.6;
   }
   powerFx.update(t, S.power);
@@ -614,8 +678,12 @@ function frame(now) {
     if (cans) {
       S.nitro = Math.min(1, S.nitro + 0.35 * cans);
       toast('+NITRO', 'nitro');
+      progress.add('cans', cans);
     }
-    if (boxes) activatePower(randomPower());
+    if (boxes) {
+      activatePower(randomPower());
+      progress.add('boxes', boxes);
+    }
     if (S.s >= route.length - 14) finish();
   }
   effects.update(dt);
@@ -643,7 +711,7 @@ window.addEventListener('resize', () => {
 // Test hook for automated checks; only exists in the dev server.
 if (import.meta.env.DEV) {
   window.__game = {
-    S, activatePower, finish, startRace, selectMap, selectCar,
+    S, activatePower, finish, startRace, selectMap, selectCar, progress,
     get route() { return route; },
     set orbit(a) { orbitAngle = a; },
   };
@@ -651,4 +719,5 @@ if (import.meta.env.DEV) {
 
 selectCar(prefs.car);
 selectMap(prefs.map);
+progress.connect();
 requestAnimationFrame(frame);

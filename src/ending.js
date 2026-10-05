@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 
-// The finish cutscene: the car parks on the curb, the driver jumps out, a couch
-// and TV pop out of the ground and they start gaming immediately.
+// The finish cutscene: the car parks on the curb, the driver jumps out, the
+// destination's scene pops out of the ground and they dive straight into it:
+// gaming on the couch at home, a giant burger at Odd Burger, noodles at Noodle
+// Feast, a beach lounger at the lake, shopping bags in Windermere, a BBQ in Sherwood Park.
 //
 // Everything is laid out in a local frame at the end of the route:
 // x = metres to the right of the road centre, -z = forward, y = up.
@@ -51,7 +53,11 @@ function makePerson() {
   group.add(...legs, ...arms);
   const controller = box(0.38, 0.08, 0.18, black, 0, 1.12, -0.56);
   group.add(controller);
-  return { group, legs, arms, controller };
+  // Whatever the theme hands them goes here (in the right hand).
+  const hand = new THREE.Group();
+  hand.position.set(-0.05, -0.68, -0.05);
+  arms[1].add(hand);
+  return { group, legs, arms, controller, hand };
 }
 
 function makeBubble() {
@@ -88,6 +94,246 @@ function makeBubble() {
   return sprite;
 }
 
+
+const cyl = (rt, rb, h, material, x = 0, y = 0, z = 0, seg = 20) => {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rt, rb, h, seg), material);
+  m.position.set(x, y, z);
+  return m;
+};
+
+function couchSeat() {
+  const g = new THREE.Group();
+  const fabric = mat(0x8e3b46);
+  g.add(
+    box(2.4, 0.5, 1, fabric, 0, 0.25, 0),
+    box(2.4, 0.8, 0.25, fabric, 0, 0.75, 0.45),
+    box(0.25, 0.7, 1, fabric, -1.2, 0.45, 0),
+    box(0.25, 0.7, 1, fabric, 1.2, 0.45, 0),
+  );
+  return g;
+}
+
+function benchSeat(color = 0x9a6a3c) {
+  const g = new THREE.Group();
+  const wood = mat(color);
+  g.add(box(2.2, 0.12, 0.6, wood, 0, 0.46, 0));
+  for (const x of [-0.9, 0.9]) g.add(box(0.12, 0.42, 0.5, mat(0x333333), x, 0.21, 0));
+  return g;
+}
+
+function table(top = 0xb5835a) {
+  const g = new THREE.Group();
+  g.add(box(2.4, 0.1, 1.4, mat(top), 0, 1.0, 0));
+  for (const x of [-1, 1]) for (const z of [-0.55, 0.55]) g.add(box(0.1, 1.0, 0.1, mat(0x333333), x, 0.5, z));
+  return g;
+}
+
+function burger(scale = 1) {
+  const g = new THREE.Group();
+  const bun = mat(0xd9913c);
+  g.add(
+    cyl(0.5, 0.48, 0.16, bun, 0, 0.08, 0),
+    cyl(0.52, 0.52, 0.12, mat(0x5a2e1a), 0, 0.22, 0),
+    box(0.95, 0.04, 0.95, mat(0xffc42e), 0, 0.3, 0),
+    cyl(0.56, 0.56, 0.05, mat(0x58b33b), 0, 0.35, 0),
+  );
+  const top = new THREE.Mesh(new THREE.SphereGeometry(0.5, 20, 10, 0, Math.PI * 2, 0, Math.PI / 2), bun);
+  top.scale.y = 0.7;
+  top.position.y = 0.37;
+  g.add(top);
+  for (let k = 0; k < 9; k++) {
+    const a = k * 2.4;
+    const seed = box(0.06, 0.03, 0.03, mat(0xfff3d0), Math.cos(a) * 0.28 * ((k % 3) + 1) / 3, 0.66, Math.sin(a) * 0.28 * ((k % 3) + 1) / 3);
+    g.add(seed);
+  }
+  g.scale.setScalar(scale);
+  return g;
+}
+
+function noodleBowl(scale = 1) {
+  const g = new THREE.Group();
+  const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.55, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), mat(0xe8e2d4));
+  bowl.material.side = THREE.DoubleSide;
+  bowl.position.y = 0.55;
+  g.add(bowl, cyl(0.52, 0.52, 0.04, mat(0xc4632a), 0, 0.5, 0));
+  for (let k = 0; k < 14; k++) {
+    const a = k * 2.2;
+    const n = new THREE.Mesh(new THREE.TorusGeometry(0.12 + (k % 4) * 0.06, 0.018, 6, 16), mat(0xf3d36b));
+    n.rotation.x = Math.PI / 2;
+    n.position.set(Math.cos(a) * 0.12, 0.53, Math.sin(a) * 0.12);
+    g.add(n);
+  }
+  g.add(box(0.2, 0.03, 0.2, mat(0xf2a7b9), 0.2, 0.54, 0.1), box(0.14, 0.03, 0.22, mat(0x3a7a3a), -0.18, 0.54, -0.1));
+  for (const x of [-0.04, 0.04]) {
+    const stick = box(0.025, 0.025, 1.0, mat(0x7a4b25), x, 0.75, 0.15);
+    stick.rotation.x = -0.6;
+    g.add(stick);
+  }
+  g.scale.setScalar(scale);
+  return g;
+}
+
+function bag(color) {
+  const g = new THREE.Group();
+  g.add(box(0.5, 0.6, 0.22, mat(color), 0, 0.3, 0));
+  const handle = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.02, 6, 12, Math.PI), mat(0x222222));
+  handle.position.y = 0.6;
+  g.add(handle);
+  return g;
+}
+
+// Each theme: a seat for the person, a prop in front of them, what they hold, and the final shout.
+const THEMES = {
+  game: {
+    text: 'GAME TIME 🎮',
+    build(e) {
+      const tv = new THREE.Group();
+      e.screenMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+      const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 1.6), e.screenMat);
+      screen.position.set(0, 1.9, 0.08);
+      tv.add(
+        box(0.3, 1.0, 0.3, mat(0x222222), 0, 0.5, 0),
+        box(3, 1.8, 0.15, mat(0x151515), 0, 1.9, 0),
+        screen,
+        box(0.6, 0.15, 0.4, mat(0x222222, 0x1e6bff), 0.9, 0.08, 0.4),
+      );
+      return { seat: couchSeat(), prop: tv, controller: true };
+    },
+    animate(e, t) {
+      if (Math.floor(t * 8) !== e.flick) {
+        e.flick = Math.floor(t * 8);
+        e.screenMat.color.setHSL(Math.random(), 0.9, 0.55);
+      }
+      return 1.1 + Math.sin(t * 30) * 0.08;
+    },
+  },
+  burger: {
+    text: 'BURGER TIME 🍔',
+    build() {
+      const prop = table(0xd8402f);
+      const big = burger(1.3);
+      big.position.y = 1.05;
+      prop.add(big);
+      return { seat: benchSeat(0xd8402f), prop, hand: burger(0.32), propZ: -1.6 };
+    },
+    // Chomp: hand to mouth and back.
+    animate(e, t) {
+      return 1.4 + Math.max(0, Math.sin(t * 7)) * 1.2;
+    },
+  },
+  noodle: {
+    text: 'NOODLE TIME 🍜',
+    build(e) {
+      const prop = table(0x8a5a35);
+      const bowl = noodleBowl(1.2);
+      bowl.position.y = 1.05;
+      prop.add(bowl);
+      e.steam = [0, 1, 2].map((k) => {
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.6 }));
+        puff.position.set((k - 1) * 0.25, 2.0, 0);
+        prop.add(puff);
+        return puff;
+      });
+      const sticks = new THREE.Group();
+      for (const x of [-0.03, 0.03]) sticks.add(box(0.02, 0.02, 0.5, mat(0x7a4b25), x, 0, -0.2));
+      return { seat: benchSeat(0x8a5a35), prop, hand: sticks, propZ: -1.6 };
+    },
+    // Slurp: quick little lifts.
+    animate(e, t) {
+      e.steam.forEach((p, k) => {
+        const c = (t * 0.6 + k / 3) % 1;
+        p.position.y = 1.9 + c * 1.4;
+        p.material.opacity = 0.6 * (1 - c);
+        p.scale.setScalar(0.6 + c);
+      });
+      return 1.5 + Math.abs(Math.sin(t * 9)) * 0.7;
+    },
+  },
+  beach: {
+    text: 'BEACH TIME 🏖️',
+    build() {
+      const seat = new THREE.Group();
+      const towel = box(1.2, 0.04, 2.4, mat(0x2bb3c0), 0, 0.03, 0.3);
+      const back = box(1.0, 0.08, 1.0, mat(0xffffff), 0, 0.7, 0.55);
+      back.rotation.x = -0.9;
+      seat.add(towel, box(1.0, 0.1, 1.2, mat(0xffffff), 0, 0.45, 0), back);
+      for (const x of [-0.45, 0.45]) seat.add(box(0.06, 0.4, 0.06, mat(0xcccccc), x, 0.2, -0.4), box(0.06, 0.4, 0.06, mat(0xcccccc), x, 0.2, 0.4));
+      const prop = new THREE.Group();
+      prop.add(new THREE.Mesh(new THREE.CircleGeometry(4, 24).rotateX(-Math.PI / 2), mat(0xf0d9a0)));
+      prop.children[0].position.y = 0.02;
+      prop.add(cyl(0.04, 0.04, 2.6, mat(0xdddddd), 1.4, 1.3, 1.5));
+      const shade = new THREE.Mesh(new THREE.ConeGeometry(1.5, 0.6, 12), mat(0xff5a5a));
+      shade.position.set(1.4, 2.6, 1.5);
+      prop.add(shade, cyl(0.3, 0.3, 0.3, mat(0xffd84d), -1.6, 0.15, 0.5));
+      const drink = new THREE.Group();
+      drink.add(cyl(0.07, 0.06, 0.22, mat(0xff8c3a), 0, 0, 0), cyl(0.008, 0.008, 0.25, mat(0xffffff), 0.03, 0.15, 0));
+      return { seat, prop, hand: drink, propZ: 0 };
+    },
+    // Lounging: one sip now and then.
+    animate(e, t) {
+      return 0.6 + Math.max(0, Math.sin(t * 2)) * 1.6;
+    },
+  },
+  shopping: {
+    text: 'SHOPPING TIME 🛍️',
+    build() {
+      const prop = new THREE.Group();
+      [0xe84a8a, 0x3ab4e8, 0xffc42e, 0x7ad35a, 0xa86ae8].forEach((c, k) => {
+        const b = bag(c);
+        b.position.set(-1.2 + k * 0.6, 0, (k % 2) * 0.3);
+        b.rotation.y = (k - 2) * 0.3;
+        prop.add(b);
+      });
+      const held = bag(0xff7a2a);
+      held.scale.setScalar(0.7);
+      held.position.y = -0.4;
+      return { seat: benchSeat(0x5f7a8f), prop, hand: held, propZ: -1.4 };
+    },
+    // Showing off the new stuff.
+    animate(e, t) {
+      return 1.6 + Math.sin(t * 6) * 0.9;
+    },
+  },
+  bbq: {
+    text: 'BBQ TIME 🌭',
+    build(e) {
+      const prop = new THREE.Group();
+      prop.add(
+        cyl(0.55, 0.45, 0.5, mat(0x222222), 0, 1.0, 0),
+        box(1.0, 0.03, 1.0, mat(0x777777), 0, 1.26, 0),
+        cyl(0.04, 0.04, 0.9, mat(0x333333), -0.3, 0.45, 0),
+        cyl(0.04, 0.04, 0.9, mat(0x333333), 0.3, 0.45, 0),
+      );
+      for (let k = 0; k < 4; k++) {
+        const dog = cyl(0.06, 0.06, 0.45, mat(0xb5452a), -0.3 + k * 0.2, 1.31, 0);
+        dog.rotation.x = Math.PI / 2;
+        prop.add(dog);
+      }
+      e.smoke = [0, 1].map((k) => {
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), new THREE.MeshBasicMaterial({ color: 0xdddddd, transparent: true, opacity: 0.5 }));
+        prop.add(puff);
+        return puff;
+      });
+      const dog = new THREE.Group();
+      const bun = cyl(0.08, 0.08, 0.36, mat(0xd9913c), 0, 0, 0);
+      bun.rotation.x = Math.PI / 2;
+      const sausage = cyl(0.05, 0.05, 0.42, mat(0xb5452a), 0, 0.05, 0);
+      sausage.rotation.x = Math.PI / 2;
+      dog.add(bun, sausage);
+      return { seat: benchSeat(0x3d6b4a), prop, hand: dog, propZ: -1.5 };
+    },
+    animate(e, t) {
+      e.smoke.forEach((p, k) => {
+        const c = (t * 0.5 + k / 2) % 1;
+        p.position.set(Math.sin(t + k) * 0.2, 1.4 + c * 1.8, 0);
+        p.material.opacity = 0.5 * (1 - c);
+        p.scale.setScalar(0.7 + c * 1.2);
+      });
+      return 1.4 + Math.max(0, Math.sin(t * 6)) * 1.1;
+    },
+  },
+};
+
 export class Ending {
   constructor(scene) {
     this.root = new THREE.Group();
@@ -96,27 +342,9 @@ export class Ending {
     this.person = makePerson();
     this.root.add(this.person.group);
 
-    this.couch = new THREE.Group();
-    const fabric = mat(0x8e3b46);
-    this.couch.add(
-      box(2.4, 0.5, 1, fabric, 0, 0.25, 0),
-      box(2.4, 0.8, 0.25, fabric, 0, 0.75, 0.45),
-      box(0.25, 0.7, 1, fabric, -1.2, 0.45, 0),
-      box(0.25, 0.7, 1, fabric, 1.2, 0.45, 0),
-    );
-    this.root.add(this.couch);
-
-    this.tv = new THREE.Group();
-    this.screenMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
-    const screen = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 1.6), this.screenMat);
-    screen.position.set(0, 1.9, 0.08);
-    this.tv.add(
-      box(0.3, 1.0, 0.3, mat(0x222222), 0, 0.5, 0),
-      box(3, 1.8, 0.15, mat(0x151515), 0, 1.9, 0),
-      screen,
-      box(0.6, 0.15, 0.4, mat(0x222222, 0x1e6bff), 0.9, 0.08, 0.4),
-    );
-    this.root.add(this.tv);
+    this.couch = new THREE.Group(); // the seat
+    this.tv = new THREE.Group(); // the prop in front of it
+    this.root.add(this.couch, this.tv);
 
     this.bubble = makeBubble();
     this.root.add(this.bubble);
@@ -125,10 +353,11 @@ export class Ending {
   }
 
   // Lay out the scene at the end of a route.
-  setRoute(route, heightAt, cheer) {
+  setRoute(route, heightAt, cheer, theme = 'game') {
     this.route = route;
     this.heightAt = heightAt;
     this.cheer = cheer;
+    this.setTheme(theme);
     const L = route.length;
     this.root.position.copy(route.toWorld(L, 0, 0));
     this.root.rotation.set(0, route.yaw(L), 0);
@@ -138,9 +367,19 @@ export class Ending {
     this.parkX = R + 2.6;
     this.couchX = R + 8.5;
     this.couchZ = 0;
-    this.tvZ = -4.5;
+    this.tvZ = this.parts.propZ ?? -4.5;
     this.couch.position.set(this.couchX, this.ground(this.couchX, this.couchZ) + 0.1, this.couchZ);
     this.tv.position.set(this.couchX, this.ground(this.couchX, this.tvZ) + 0.1, this.tvZ);
+  }
+
+  setTheme(name) {
+    this.theme = THEMES[name] ?? THEMES.game;
+    for (const g of [this.couch, this.tv, this.person.hand]) g.clear();
+    this.parts = this.theme.build(this);
+    this.couch.add(this.parts.seat);
+    this.tv.add(this.parts.prop);
+    if (this.parts.hand) this.person.hand.add(this.parts.hand);
+    this.person.controller.visible = false;
   }
 
   // Ground height in the local frame (falls back to road level).
@@ -229,21 +468,14 @@ export class Ending {
       z = this.couchZ;
       lift = -0.3 + Math.abs(Math.sin(t * 9)) * 0.06;
       g.rotation.y = 0;
-      this.pose(Math.PI / 2, 1.1 + Math.sin(t * 30) * 0.08, true);
-      this.bubble.userData.setText('GAME TIME 🎮');
+      this.pose(Math.PI / 2, this.theme.animate(this, t), true);
+      this.bubble.userData.setText(this.theme.text);
     }
     const gy = this.ground(x, z) + 0.1;
     g.position.set(x, gy + lift, z);
     this.bubble.position.set(x, gy + lift + 2.7, z);
 
-    if (t > 4.1) {
-      if (Math.floor(t * 8) !== this.flick) {
-        this.flick = Math.floor(t * 8);
-        this.screenMat.color.setHSL(Math.random(), 0.9, 0.55);
-      }
-    } else {
-      this.screenMat.color.set(0x111111);
-    }
+    if (this.screenMat && t <= 4.1) this.screenMat.color.set(0x111111);
 
     camera.fov = 55;
     camera.updateProjectionMatrix();
@@ -266,6 +498,7 @@ export class Ending {
     p.legs[1].rotation.x = sitting ? legAngle : -legAngle;
     p.arms[0].rotation.x = armAngle;
     p.arms[1].rotation.x = holding ? armAngle : -armAngle;
-    p.controller.visible = holding;
+    p.controller.visible = holding && Boolean(this.parts.controller);
+    p.hand.visible = holding || !this.parts.controller;
   }
 }

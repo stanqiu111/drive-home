@@ -230,5 +230,33 @@ export const FUN_RIDES = {
       ],
     },
   },
+  rocket: {
+    name: 'Rocket', desc: 'Locked: earn every achievement to fly it', heavy: true, locked: true, flame: true, smasher: true,
+    stats: { top: 1.6, accel: 1.9, grip: 1.6 },
+    spec: {
+      wheels: false,
+      seatZ: 0.15,
+      parts: [
+        // Body lying along the road, nose forward.
+        ['cylinder', [1.0, 3.2, 1.0], [0, 0.8, 0.1], '#f4f4f0', 'glossy', [90, 0, 0]],
+        ['cone', [1.0, 1.3, 1.0], [0, 0.8, -2.15], '#e0312b', 'glossy', [-90, 0, 0]],
+        ['cylinder', [1.04, 0.18, 1.04], [0, 0.8, -1.4], '#e0312b', 'glossy', [90, 0, 0]],
+        ['cylinder', [1.04, 0.12, 1.04], [0, 0.8, 1.25], '#2b2e35', 'metal', [90, 0, 0]],
+        // Porthole.
+        ['cylinder', [0.42, 0.08, 0.42], [0.5, 0.9, -0.7], '#c9ced6', 'metal', [0, 0, 90]],
+        ['cylinder', [0.3, 0.1, 0.3], [0.51, 0.9, -0.7], '#5fb7ff', 'glass', [0, 0, 90]],
+        ['cylinder', [0.42, 0.08, 0.42], [-0.5, 0.9, -0.7], '#c9ced6', 'metal', [0, 0, 90]],
+        ['cylinder', [0.3, 0.1, 0.3], [-0.51, 0.9, -0.7], '#5fb7ff', 'glass', [0, 0, 90]],
+        // Fins.
+        ['box', [0.08, 0.9, 0.9], [0, 1.55, 1.15], '#e0312b', 'glossy', [-20, 0, 0]],
+        ['box', [0.9, 0.08, 0.9], [-0.75, 0.55, 1.15], '#e0312b', 'glossy', [0, 0, 20]],
+        ['box', [0.9, 0.08, 0.9], [0.75, 0.55, 1.15], '#e0312b', 'glossy', [0, 0, -20]],
+        // Nozzle and its glow.
+        ['cone', [0.7, 0.5, 0.7], [0, 0.8, 1.55], '#3a3d42', 'metal', [-90, 0, 0]],
+        ['cone', [0.6, 1.1, 0.6], [0, 0.8, 2.25], '#ff8a2a', 'glow', [-90, 0, 0]],
+        ['cone', [0.32, 0.8, 0.32], [0, 0.8, 2.15], '#fff1a8', 'glow', [-90, 0, 0]],
+      ],
+    },
+  },
 };
 export const FUN_IDS = Object.keys(FUN_RIDES);

@@ -6,7 +6,8 @@ const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 export const leaderboardEnabled = Boolean(URL && KEY);
 
-const headers = () => ({ apikey: KEY, Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' });
+// Publishable (sb_publishable_…) keys go in the apikey header only; they aren't JWTs.
+const headers = () => ({ apikey: KEY, 'Content-Type': 'application/json' });
 
 export async function topScores(map, limit = 10) {
   if (!leaderboardEnabled) return [];

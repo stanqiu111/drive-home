@@ -219,8 +219,8 @@ export const CAR_MODELS = {
     len: 1.8, width: 0.65, wheelR: 0.34, stats: { top: 0.62, accel: 0.8, grip: 1.35 },
   },
   ebike: {
-    kind: 'bike', electric: true, brand: 'Cam’s', name: 'E-bike', color: 0xf2a33a, desc: 'Pedal assist: quick off the line, still tiny',
-    len: 1.85, width: 0.65, wheelR: 0.35, stats: { top: 0.75, accel: 1.2, grip: 1.3 },
+    kind: 'bike', electric: true, brand: 'Cam’s', name: 'E-bike', color: 0xf2a33a, desc: 'Tuned motor: keeps up with the cars, still tiny',
+    len: 1.85, width: 0.65, wheelR: 0.35, stats: { top: 1.0, accel: 1.2, grip: 1.3 },
   },
 };
 

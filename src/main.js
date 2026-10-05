@@ -132,7 +132,8 @@ function selectCar(id) {
   if (!carAvailable(id)) {
     const done = progress.data.achievements.length;
     toast(`🔒 Earn all achievements (${done}/${ACHIEVEMENTS.length})`, 'crash');
-    document.getElementById('achievements')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    $('ach-box').open = true;
+    $('ach-box').scrollIntoView({ behavior: 'smooth', block: 'center' });
     return;
   }
   prefs.car = id;
@@ -211,6 +212,8 @@ function renderMenu() {
       <span>${desc}</span></button>`;
   }).join('');
   renderAchievements();
+  const car = modelOf(prefs.car);
+  $('pick').innerHTML = `<b>${mapInfo().name}</b> in the <b>${CAR_MODELS[prefs.car] ? `${car.brand} ` : ''}${car.name}</b>`;
   if (FUN_RIDES[prefs.car]) {
     ui.paint.innerHTML = '';
     return;
@@ -433,6 +436,15 @@ function setupBoard(map, time, crashes) {
   showBoard(map);
   renderPost(map, time, crashes);
 }
+
+document.querySelectorAll('.go-btn').forEach((b) => b.addEventListener('click', startRace));
+$('menu-btn').addEventListener('click', showMenu);
+window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement) return;
+  if (e.code === 'Enter' && (S.mode === 'menu' || S.mode === 'finished')) startRace();
+  if (e.code === 'Escape' && S.mode === 'finished') showMenu();
+});
+setupTouch(ui.touch);
 
 // --- Powers ---
 function activatePower(kind) {

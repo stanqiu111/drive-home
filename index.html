@@ -50,26 +50,34 @@
     </div>
 
     <div id="start" class="screen show">
-      <div class="card wide">
-        <h1>Drive Home</h1>
-        <p class="sub">Real Edmonton roads. No traffic jams, if you're fast enough.</p>
-        <h2>Choose your drive</h2>
-        <div id="map-list" class="tiles"></div>
-        <h2>Choose your car</h2>
-        <div id="car-list" class="tiles cars"></div>
-        <div id="paint" class="swatches"></div>
-        <h2>Achievements</h2>
-        <p id="ach-summary" class="hint"></p>
-        <div id="achievements"></div>
-        <div class="controls">
-          <span><kbd>↑</kbd> gas</span>
-          <span><kbd>↓</kbd> brake</span>
-          <span><kbd>←</kbd><kbd>→</kbd> steer</span>
-          <span><kbd>Shift</kbd> nitro</span>
-          <span><b>?</b> boxes: 🛡️ 🚀 ✈️ 💥</span>
+      <div class="card wide menu">
+        <div class="menu-body">
+          <h1>Drive Home</h1>
+          <p class="sub">Real Edmonton roads. No traffic jams, if you're fast enough.</p>
+          <h2>Choose your drive</h2>
+          <div id="map-list" class="tiles"></div>
+          <h2>Choose your car</h2>
+          <div id="car-list" class="tiles cars"></div>
+          <div id="paint" class="swatches"></div>
+          <details id="ach-box">
+            <summary><b>🏅 Achievements</b> <span id="ach-summary"></span></summary>
+            <div id="achievements"></div>
+          </details>
+          <p id="credits"></p>
         </div>
-        <button class="go-btn">Start driving</button>
-        <p id="credits"></p>
+        <div class="menu-foot">
+          <div class="controls">
+            <span><kbd>↑</kbd> gas</span>
+            <span><kbd>↓</kbd> brake</span>
+            <span><kbd>←</kbd><kbd>→</kbd> steer</span>
+            <span><kbd>Shift</kbd> nitro</span>
+            <span><b>?</b> boxes: 🛡️ 🚀 ✈️ 💥</span>
+          </div>
+          <div class="foot-row">
+            <span id="pick"></span>
+            <button class="go-btn">Start driving</button>
+          </div>
+        </div>
       </div>
     </div>
 

@@ -137,8 +137,6 @@ export function buildFun(spec) {
 // ---------- designs ----------
 // Each part: [shape, [sx, sy, sz], [x, y, z], colour, finish, [rotX, rotY, rotZ] degrees]
 
-const BLUE = '#2f6db5';
-const CUSHION = '#3b7fd0';
 
 const fries = [
   [-0.6, -0.8, 20, -15], [-0.2, -0.9, -10, 10], [0.3, -0.85, 15, 20], [0.65, -0.6, -20, -10],
@@ -153,24 +151,6 @@ const OILERS_BLUE = '#0a3a8c';
 const OILERS_ORANGE = '#ff4c00';
 
 export const FUN_RIDES = {
-  sofa: {
-    name: 'Sofa', desc: 'Couch-to-downtown in record time',
-    stats: { top: 0.8, accel: 0.85, grip: 1.1 },
-    spec: {
-      wheels: true,
-      parts: [
-        ['box', [2.2, 0.45, 1.0], [0, 0.42, 0], BLUE],
-        ['box', [1.0, 0.22, 0.85], [-0.52, 0.75, -0.05], CUSHION],
-        ['box', [1.0, 0.22, 0.85], [0.52, 0.75, -0.05], CUSHION],
-        ['box', [2.2, 0.75, 0.3], [0, 0.95, 0.38], BLUE],
-        ['box', [1.0, 0.55, 0.18], [-0.52, 1.0, 0.2], CUSHION],
-        ['box', [1.0, 0.55, 0.18], [0.52, 1.0, 0.2], CUSHION],
-        ['box', [0.25, 0.6, 1.0], [-1.1, 0.75, 0], '#2a62a3'],
-        ['box', [0.25, 0.6, 1.0], [1.1, 0.75, 0], '#2a62a3'],
-        ['box', [0.4, 0.38, 0.12], [0.78, 1.02, 0.05], '#ffb347', 'matte', [0, 0, 15]],
-      ],
-    },
-  },
   poutine: {
     name: 'Poutine', desc: 'Gravy-powered. Extra sticky in corners',
     stats: { top: 0.9, accel: 0.9, grip: 1.25 },

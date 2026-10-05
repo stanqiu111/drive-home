@@ -26,6 +26,7 @@ const BASE_SPEED = 45; // m/s ≈ 162 km/h before car stats
 const NITRO_BONUS = 21; // m/s on top of the car's top speed
 const TURBO_SPEED = 90; // m/s ≈ 324 km/h
 const FLY_HEIGHT = 7;
+const LIFTOFF_SPEED = 250 / 3.6; // rides that can fly (the Rocket) take off above this
 const BLAST_RANGE = 110;
 const RUSH_HOUR_SPEED = 8; // m/s, roughly what the real commute averages at rush hour
 const PREFS_KEY = 'driveHome.prefs';
@@ -205,7 +206,7 @@ function renderMenu() {
   }).join('') + FUN_IDS.map((id) => {
     const f = FUN_RIDES[id];
     const locked = !carAvailable(id);
-    const desc = f.locked && !locked ? '259 km/h and smashes straight through traffic' : f.desc;
+    const desc = f.locked && !locked ? 'Endless nitro, flies above 250 km/h, smashes through traffic' : f.desc;
     return `<button class="tile car fun ${id === prefs.car ? 'sel' : ''} ${locked ? 'locked' : ''}" data-car="${id}">
       <small>${f.locked ? (locked ? '🔒 Locked' : '🚀 Unlocked') : 'Fun ride'}</small><b>${f.name}</b>
       ${bar('Speed', f.stats.top)}${bar('Accel', f.stats.accel)}${bar('Grip', f.stats.grip)}
@@ -288,7 +289,7 @@ ui.carList.addEventListener('click', (e) => {
 function reset() {
   Object.assign(S, {
     s: 8, y: 0, speed: 0, steer: 0, nitro: 1, boosting: false, drifting: false, driftYaw: 0,
-    power: null, powerTime: 0, time: 0, crashes: 0, smashed: 0, reds: 0, invuln: 0, shake: 0,
+    power: null, powerTime: 0, time: 0, crashes: 0, smashed: 0, reds: 0, invuln: 0, shake: 0, airborne: false,
   });
   S.x = route.laneLat(0, S.s);
   traffic.reset(S);
@@ -485,7 +486,7 @@ function drive(dt, input) {
   if (S.boosting) {
     accel += 22;
     max = top + NITRO_BONUS;
-    S.nitro = Math.max(0, S.nitro - dt * 0.3);
+    if (!modelOf(prefs.car).infiniteNitro) S.nitro = Math.max(0, S.nitro - dt * 0.3);
   } else {
     S.nitro = Math.min(1, S.nitro + dt * 0.025);
   }
@@ -530,7 +531,11 @@ function drive(dt, input) {
     toast('😈 RAN A RED!', 'crash');
   }
   spinWheels(player, ds);
-  S.y += ((S.power === 'fly' ? FLY_HEIGHT : 0) - S.y) * Math.min(1, dt * 3);
+  // The Rocket lifts off at high speed and lands again when it slows down.
+  const airborne = modelOf(prefs.car).liftoff && S.speed > LIFTOFF_SPEED;
+  if (airborne && !S.airborne) toast('🚀 LIFT OFF!', 'power');
+  S.airborne = airborne;
+  S.y += ((S.power === 'fly' || airborne ? FLY_HEIGHT : 0) - S.y) * Math.min(1, dt * 3);
 }
 
 function checkCollisions() {
@@ -600,14 +605,15 @@ const tmpB = new THREE.Vector3();
 let snapCamera = true;
 
 function updateChaseCamera(dt) {
-  const targetFov = 62 + S.speed * 0.28 + (S.boosting ? 6 : 0);
+  const targetFov = Math.min(84, 62 + S.speed * 0.28 + (S.boosting ? 6 : 0));
   S.fov += (targetFov - S.fov) * Math.min(1, dt * 3);
   camera.fov = S.fov;
   camera.updateProjectionMatrix();
 
   route.toWorld(S.s - 8.5, S.x * 0.8, 3.6 + S.y * 1.1, tmpA);
   route.toWorld(S.s + 14, S.x * 0.9, 1.4 + S.y * 0.8, tmpB);
-  const k = snapCamera ? 1 : Math.min(1, dt * 8);
+  // Follow harder at high speed so the camera never falls far behind (the Rocket does 360+ km/h).
+  const k = snapCamera ? 1 : Math.min(1, dt * (8 + S.speed * 0.35));
   camPos.lerp(tmpA, k);
   camLook.lerp(tmpB, k);
   snapCamera = false;

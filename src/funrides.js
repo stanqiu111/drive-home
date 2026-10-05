@@ -211,8 +211,8 @@ export const FUN_RIDES = {
     },
   },
   rocket: {
-    name: 'Rocket', desc: 'Locked: earn every achievement to fly it', heavy: true, locked: true, flame: true, smasher: true,
-    stats: { top: 1.6, accel: 1.9, grip: 1.6 },
+    name: 'Rocket', desc: 'Locked: earn every achievement to fly it', heavy: true, locked: true, flame: true, smasher: true, infiniteNitro: true, liftoff: true,
+    stats: { top: 1.8, accel: 1.9, grip: 1.6 },
     spec: {
       wheels: false,
       seatZ: 0.15,

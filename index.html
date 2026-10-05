@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <title>Drive Home</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚗</text></svg>" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="hud" class="hidden">
+      <div id="top">
+        <div class="pill" id="time">0:00.0</div>
+        <div id="progress">
+          <div id="progress-fill"></div>
+          <span id="car-icon">🚗</span>
+          <span id="home-icon">🏠</span>
+        </div>
+        <div class="pill" id="dist">0.00 km</div>
+      </div>
+      <div id="street"></div>
+      <div id="crashes"></div>
+      <div id="power" class="hidden">
+        <div id="power-label"></div>
+        <div id="power-bar"><div id="power-fill"></div></div>
+      </div>
+      <div id="turn" class="hidden"></div>
+      <div id="speedo">
+        <div><span id="speed">0</span><small>km/h</small></div>
+        <div id="nitro"><div id="nitro-fill"></div></div>
+        <div class="label">NITRO</div>
+      </div>
+    </div>
+
+    <div id="countdown"></div>
+    <div id="toast"></div>
+    <div id="loading" class="show">Loading Edmonton…</div>
+
+    <div id="touch" class="hidden">
+      <div class="group">
+        <button data-touch="left">◀</button>
+        <button data-touch="right">▶</button>
+      </div>
+      <div class="group">
+        <button data-touch="brake">BRAKE</button>
+        <button data-touch="nitro" class="nitro">NITRO</button>
+      </div>
+    </div>
+
+    <div id="start" class="screen show">
+      <div class="card wide">
+        <h1>Drive Home</h1>
+        <p class="sub">Real Edmonton roads. No traffic jams, if you're fast enough.</p>
+        <h2>Choose your drive</h2>
+        <div id="map-list" class="tiles"></div>
+        <h2>Choose your car</h2>
+        <div id="car-list" class="tiles cars"></div>
+        <div id="paint" class="swatches"></div>
+        <div class="controls">
+          <span><kbd>↑</kbd> gas</span>
+          <span><kbd>↓</kbd> brake</span>
+          <span><kbd>←</kbd><kbd>→</kbd> steer</span>
+          <span><kbd>Shift</kbd> nitro</span>
+          <span><b>?</b> boxes: 🛡️ 🚀 ✈️ 💥</span>
+        </div>
+        <button class="go-btn">Start driving</button>
+        <p id="credits"></p>
+      </div>
+    </div>
+
+    <div id="finish" class="screen corner">
+      <div class="card">
+        <h1>Made it! 🏠</h1>
+        <div id="result"></div>
+        <button class="go-btn">Drive again</button>
+        <button id="menu-btn" class="link-btn">Change map or car</button>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

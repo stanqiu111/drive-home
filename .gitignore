@@ -4,3 +4,4 @@ tools/cache
 .DS_Store
 .env*.local
 .vercel
+.env*

@@ -1,7 +1,7 @@
 // Achievements and per-player stats. Progress is kept in localStorage so it works
 // offline, and synced to Supabase (one row per anonymously signed-in player) when
 // the database is configured. Merging always keeps the best of both copies.
-import { createClient } from '@supabase/supabase-js';
+import { supabase } from './supabase.js';
 
 export const ACHIEVEMENTS = [
   { id: 'first_trip', icon: '🏁', name: 'First commute', desc: 'Finish any drive', stat: 'trips', goal: 1 },
@@ -14,9 +14,6 @@ export const ACHIEVEMENTS = [
 export const ROCKET_NEEDS = ACHIEVEMENTS.length;
 
 const LOCAL_KEY = 'driveHome.progress';
-const URL = import.meta.env.VITE_SUPABASE_URL;
-const KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
-const supabase = URL && KEY ? createClient(URL, KEY) : null;
 
 const empty = () => ({ stats: { trips: 0, cans: 0, boxes: 0, smashed: 0, food: 0, maps: [] }, achievements: [] });
 
@@ -39,6 +36,7 @@ class Progress {
     } catch { /* storage unavailable */ }
     this.listeners = [];
     this.online = false;
+    this.name = null; // fixed player name, set once (stored in the database)
   }
 
   get unlocked() {
@@ -68,9 +66,10 @@ class Progress {
         session = data.session;
       }
       this.userId = session.user.id;
-      const { data: row, error } = await supabase.from('player_progress').select('stats, achievements').eq('user_id', this.userId).maybeSingle();
+      const { data: row, error } = await supabase.from('player_progress').select('stats, achievements, name').eq('user_id', this.userId).maybeSingle();
       if (error) throw error;
       if (row) this.data = merge(this.data, { stats: row.stats || {}, achievements: row.achievements || [] });
+      this.name = row?.name ?? null;
       this.online = true;
       this.check();
       this.saveLocal();
@@ -79,6 +78,16 @@ class Progress {
     } catch (e) {
       console.warn('Progress is saved on this device only:', e.message ?? e);
     }
+  }
+
+  // Pick the player's name. It can only be set once. Returns null, 'taken' or 'error'.
+  async setName(name) {
+    if (!this.online || this.name) return 'error';
+    const clean = name.trim().slice(0, 16);
+    const { error } = await supabase.from('player_progress').update({ name: clean }).eq('user_id', this.userId);
+    if (error) return error.code === '23505' ? 'taken' : 'error';
+    this.name = clean;
+    return null;
   }
 
   saveLocal() {
@@ -124,3 +133,5 @@ class Progress {
 }
 
 export const progress = new Progress();
+// Resolves once the player is signed in (or it's clear we're offline).
+export const progressReady = progress.connect();

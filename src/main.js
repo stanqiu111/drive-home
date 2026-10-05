@@ -7,7 +7,7 @@ import { Signals } from './signals.js';
 import { Collectibles, makeNitroCan } from './pickups.js';
 import { POWERS, randomPower, makeMysteryBox, PowerVisuals } from './powers.js';
 import { leaderboardEnabled, topScores, submitScore } from './leaderboard.js';
-import { progress, ACHIEVEMENTS } from './progress.js';
+import { progress, progressReady, ACHIEVEMENTS } from './progress.js';
 import { Effects } from './effects.js';
 import { Ending } from './ending.js';
 import { buildFun, FUN_RIDES, FUN_IDS } from './funrides.js';
@@ -351,24 +351,18 @@ function showResult() {
 }
 
 // --- Online leaderboard ---
-const NAME_KEY = 'driveHome.name';
 const esc = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 function boardHTML() {
-  let name = '';
-  try { name = localStorage.getItem(NAME_KEY) || ''; } catch { /* storage unavailable */ }
   return `
     <div id="board">
-      <form id="board-form">
-        <input id="board-name" maxlength="16" placeholder="Your name" value="${esc(name)}" autocomplete="nickname" required />
-        <button type="submit">Post time</button>
-      </form>
+      <div id="board-post"></div>
       <h3>🏆 World top 10</h3>
       <ol id="board-list"><li class="dim">Loading…</li></ol>
     </div>`;
 }
 
-async function showBoard(map, mine) {
+async function showBoard(map) {
   const list = $('board-list');
   try {
     const rows = await topScores(map);
@@ -376,7 +370,7 @@ async function showBoard(map, mine) {
     list.innerHTML = rows.length
       ? rows.map((r) => {
         const car = modelOf(r.car)?.name ?? r.car;
-        const me = mine && r.name === mine.name && r.time_ms === mine.timeMs;
+        const me = progress.name && r.name.toLowerCase() === progress.name.toLowerCase();
         return `<li class="${me ? 'me' : ''}"><span>${esc(r.name)}</span><small>${esc(car)}</small><b>${fmt(r.time_ms / 1000)}</b></li>`;
       }).join('')
       : '<li class="dim">No times yet. Be the first!</li>';
@@ -385,38 +379,60 @@ async function showBoard(map, mine) {
   }
 }
 
-function setupBoard(map, time, crashes) {
-  const form = $('board-form');
-  const input = $('board-name');
-  showBoard(map);
-  form.addEventListener('submit', async (e) => {
+// The posting area: pick a name once, then always post under it.
+function renderPost(map, time, crashes) {
+  const box = $('board-post');
+  if (!box) return;
+  if (!progress.online) {
+    box.innerHTML = '<p class="dim">Posting times needs the online player account, which isn\'t available right now.</p>';
+    return;
+  }
+  const naming = !progress.name;
+  box.innerHTML = naming
+    ? `<form id="board-form">
+        <input id="board-name" maxlength="16" placeholder="Pick your player name" autocomplete="nickname" required />
+        <button type="submit">Save &amp; post</button>
+      </form>
+      <p class="hint" id="board-msg">Choose carefully: your name is yours for good and can't be changed.</p>`
+    : `<form id="board-form">
+        <span class="as">Posting as <b>${esc(progress.name)}</b></span>
+        <button type="submit">Post time</button>
+      </form>
+      <p class="hint" id="board-msg"></p>`;
+  $('board-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const name = input.value.trim();
-    if (!name) return;
-    try { localStorage.setItem(NAME_KEY, name); } catch { /* storage unavailable */ }
-    const button = form.querySelector('button');
+    const button = $('board-form').querySelector('button');
+    const msg = $('board-msg');
     button.disabled = true;
+    if (naming) {
+      const name = $('board-name').value.trim();
+      if (!name) { button.disabled = false; return; }
+      button.textContent = 'Saving…';
+      const err = await progress.setName(name);
+      if (err) {
+        msg.textContent = err === 'taken' ? 'That name is taken. Try another one.' : 'Couldn\'t save the name. Try again.';
+        button.disabled = false;
+        button.textContent = 'Save & post';
+        return;
+      }
+    }
     button.textContent = 'Posting…';
-    const timeMs = Math.round(time * 1000);
     try {
-      await submitScore({ map, car: prefs.car, name, timeMs, crashes });
-      form.innerHTML = '<p class="record">Posted!</p>';
-      showBoard(map, { name: name.slice(0, 16), timeMs });
+      await submitScore({ map, car: prefs.car, name: progress.name, timeMs: time * 1000, crashes });
+      box.innerHTML = `<p class="record">Posted as ${esc(progress.name)}!</p>`;
+      showBoard(map);
     } catch {
+      msg.textContent = 'Couldn\'t post right now. Try again.';
       button.disabled = false;
-      button.textContent = 'Try again';
+      button.textContent = 'Post time';
     }
   });
 }
 
-document.querySelectorAll('.go-btn').forEach((b) => b.addEventListener('click', startRace));
-$('menu-btn').addEventListener('click', showMenu);
-window.addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement) return;
-  if (e.code === 'Enter' && (S.mode === 'menu' || S.mode === 'finished')) startRace();
-  if (e.code === 'Escape' && S.mode === 'finished') showMenu();
-});
-setupTouch(ui.touch);
+function setupBoard(map, time, crashes) {
+  showBoard(map);
+  renderPost(map, time, crashes);
+}
 
 // --- Powers ---
 function activatePower(kind) {
@@ -719,5 +735,5 @@ if (import.meta.env.DEV) {
 
 selectCar(prefs.car);
 selectMap(prefs.map);
-progress.connect();
+progressReady.then(() => { if (S.mode === 'menu') renderMenu(); });
 requestAnimationFrame(frame);

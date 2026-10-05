@@ -212,8 +212,6 @@ function renderMenu() {
       <span>${desc}</span></button>`;
   }).join('');
   renderAchievements();
-  const car = modelOf(prefs.car);
-  $('pick').innerHTML = `<b>${mapInfo().name}</b> in the <b>${CAR_MODELS[prefs.car] ? `${car.brand} ` : ''}${car.name}</b>`;
   if (FUN_RIDES[prefs.car]) {
     ui.paint.innerHTML = '';
     return;

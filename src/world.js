@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Route, LANE_W } from './route.js';
 
 const FOG_NEAR = 250;
@@ -47,6 +48,39 @@ function asphaltTexture() {
   });
 }
 
+// Sidewalk concrete: one tile = one 1.5 m panel, with a joint line and a little speckle.
+function concreteTexture() {
+  return canvasTexture(64, 64, (g, w, h) => {
+    g.fillStyle = '#b9b5ad';
+    g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 500; i++) {
+      const v = (165 + Math.random() * 40) | 0;
+      g.fillStyle = `rgb(${v},${v - 3},${v - 8})`;
+      g.fillRect(Math.random() * w, Math.random() * h, 1.2, 1.2);
+    }
+    g.fillStyle = 'rgba(70,66,60,0.55)';
+    g.fillRect(0, 0, w, 2);
+  });
+}
+
+// Asphalt shingles: one tile is about 1 m of roof, with courses every ~25 cm.
+function shingleTexture() {
+  return canvasTexture(64, 64, (g, w, h) => {
+    g.fillStyle = '#8a8a8a';
+    g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 900; i++) {
+      const v = (110 + Math.random() * 60) | 0;
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(Math.random() * w, Math.random() * h, 1.5, 1.5);
+    }
+    for (let y = 0; y < 4; y++) {
+      g.fillStyle = 'rgba(30,30,30,0.55)';
+      g.fillRect(0, y * 16, w, 2);
+      for (let x = 0; x < 4; x++) g.fillRect(x * 16 + (y % 2) * 8, y * 16, 1.5, 16);
+    }
+  });
+}
+
 // Tall buildings: 4×4 windows per texture tile (one tile = 4 floors).
 function towerTexture() {
   return canvasTexture(64, 64, (g) => {
@@ -64,23 +98,25 @@ function towerTexture() {
   });
 }
 
-// Houses: one window per bay and storey.
+// Houses: one tile = one storey (3 m) × two bays (6 m) of vinyl siding with a window per bay.
 function houseTexture() {
   return canvasTexture(64, 64, (g) => {
-    g.fillStyle = '#d8d2c4';
+    g.fillStyle = '#ece6da';
     g.fillRect(0, 0, 64, 64);
     for (let y = 0; y < 64; y += 4) {
-      g.fillStyle = 'rgba(0,0,0,0.06)';
+      g.fillStyle = 'rgba(0,0,0,0.07)';
       g.fillRect(0, y, 64, 1);
+      g.fillStyle = 'rgba(255,255,255,0.18)';
+      g.fillRect(0, y + 1, 64, 1);
     }
-    for (let y = 0; y < 2; y++) {
-      for (let x = 0; x < 2; x++) {
-        const lit = Math.random() < 0.35;
-        g.fillStyle = '#f4f1ea';
-        g.fillRect(x * 32 + 8, y * 32 + 9, 16, 15);
-        g.fillStyle = lit ? '#ffcf73' : '#2a313b';
-        g.fillRect(x * 32 + 10, y * 32 + 11, 12, 11);
-      }
+    for (let x = 0; x < 2; x++) {
+      const lit = Math.random() < 0.3;
+      g.fillStyle = '#fbfaf6';
+      g.fillRect(x * 32 + 7, 16, 18, 26);
+      g.fillStyle = lit ? '#ffcf73' : '#2a313b';
+      g.fillRect(x * 32 + 9, 18, 14, 22);
+      g.fillStyle = '#fbfaf6';
+      g.fillRect(x * 32 + 15, 18, 2, 22); // mullion
     }
     g.fillStyle = '#4a4a4f';
     g.fillRect(60, 60, 4, 4); // roof texel
@@ -144,6 +180,9 @@ class MeshBuilder {
     return g;
   }
 }
+
+// Exact numeric key for a grid cell (cells within ±50 000 of the origin).
+const cellKey = (ix, iz) => (ix + 50000) * 100000 + (iz + 50000);
 
 function hash(x, z) {
   const s = Math.sin(x * 12.9898 + z * 78.233) * 43758.5453;
@@ -259,6 +298,44 @@ function buildTerrain(t, h, waterLevel) {
 }
 
 // ---------- the route road ----------
+// Spatial index of side-street centrelines, to find where they meet the route.
+function sideStreetIndex(roads) {
+  const CELL = 30;
+  const grid = new Map();
+  const key = (x, z) => cellKey(Math.floor(x / CELL), Math.floor(z / CELL));
+  for (const r of roads) {
+    for (let k = 2; k < r.p.length; k += 2) {
+      const seg = [r.p[k - 2] / 10, r.p[k - 1] / 10, r.p[k] / 10, r.p[k + 1] / 10, r.w / 2];
+      const n = Math.ceil(Math.hypot(seg[2] - seg[0], seg[3] - seg[1]) / CELL) + 1;
+      const seen = new Set();
+      for (let m = 0; m <= n; m++) {
+        const kk = key(seg[0] + ((seg[2] - seg[0]) * m) / n, seg[1] + ((seg[3] - seg[1]) * m) / n);
+        if (seen.has(kk)) continue;
+        seen.add(kk);
+        if (!grid.has(kk)) grid.set(kk, []);
+        grid.get(kk).push(seg);
+      }
+    }
+  }
+  // True when a side street passes within `pad` metres of its edge at (x, z).
+  return (x, z, pad) => {
+    const cx = Math.floor(x / CELL);
+    const cz = Math.floor(z / CELL);
+    for (let a = -1; a <= 1; a++) {
+      for (let b = -1; b <= 1; b++) {
+        for (const [ax, az, bx, bz, hw] of grid.get(cellKey(cx + a, cz + b)) || []) {
+          const dx = bx - ax;
+          const dz = bz - az;
+          const l2 = dx * dx + dz * dz || 1;
+          const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2));
+          if (Math.hypot(ax + dx * t - x, az + dz * t - z) < hw + pad) return true;
+        }
+      }
+    }
+    return false;
+  };
+}
+
 function bridgeRuns(route) {
   const runs = [];
   for (let i = 0; i < route.n; i++) {
@@ -271,9 +348,26 @@ function bridgeRuns(route) {
   return runs;
 }
 
-function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt) {
+const WALK_W = 2.0; // sidewalk width (m)
+const CURB_H = 0.15;
+
+function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads) {
   const road = new MeshBuilder();
   const skirt = new MeshBuilder();
+  const walk = new MeshBuilder();
+  const curb = new MeshBuilder();
+  const nearStreet = sideStreetIndex(roads);
+  // Sidewalk on each side of each sample: city streets only, broken at intersections.
+  const hasWalk = [new Uint8Array(route.n), new Uint8Array(route.n)];
+  const tmpV = new THREE.Vector3();
+  for (let i = 0; i < route.n; i++) {
+    if (route.bridge[i] || route.cls[i] > 2) continue;
+    const s = i * route.step;
+    for (const [side, lat] of [[0, route.rightArr[i] + 0.5 + WALK_W / 2], [1, route.leftArr[i] - 0.5 - WALK_W / 2]]) {
+      route.toWorld(s, lat, 0, tmpV);
+      hasWalk[side][i] = nearStreet(tmpV.x, tmpV.z, 2.5) ? 0 : 1;
+    }
+  }
   const deck = new MeshBuilder();
   const rail = new MeshBuilder();
   const P = (s, lat, h) => route.toWorld(s, lat, h);
@@ -297,9 +391,28 @@ function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt) {
       rail.quad(P(s0, R0, 0), P(s1, R1, 0), P(s1, R1, 1.1), P(s0, R0, 1.1));
       rail.quad(P(s1, L1, 0), P(s0, L0, 0), P(s0, L0, 1.1), P(s1, L1, 1.1));
     } else {
-      // Embankment skirts so the road never floats above the ground.
-      skirt.quad(P(s0, R0, 0.02), P(s0, R0 + 2, -6), P(s1, R1 + 2, -6), P(s1, R1, 0.02));
-      skirt.quad(P(s1, L1, 0.02), P(s1, L1 - 2, -6), P(s0, L0 - 2, -6), P(s0, L0, 0.02));
+      // Curb + sidewalk where there is one, then embankment skirts so nothing floats above the ground.
+      const v0 = s0 / 1.5;
+      const v1 = s1 / 1.5;
+      if (hasWalk[0][i]) {
+        curb.quad(P(s0, R0, 0.02), P(s1, R1, 0.02), P(s1, R1, CURB_H + 0.02), P(s0, R0, CURB_H + 0.02));
+        walk.quad(P(s0, R0, CURB_H + 0.02), P(s0, R0 + WALK_W, CURB_H + 0.02), P(s1, R1 + WALK_W, CURB_H + 0.02), P(s1, R1, CURB_H + 0.02), [0, v0, 1, v0, 1, v1, 0, v1]);
+        skirt.quad(P(s0, R0 + WALK_W, CURB_H + 0.02), P(s0, R0 + WALK_W + 2, -6), P(s1, R1 + WALK_W + 2, -6), P(s1, R1 + WALK_W, CURB_H + 0.02));
+        // Close the sidewalk off where it stops at a side street.
+        if (!hasWalk[0][i - 1]) curb.quad(P(s0, R0, 0.02), P(s0, R0, CURB_H + 0.02), P(s0, R0 + WALK_W, CURB_H + 0.02), P(s0, R0 + WALK_W, 0.02));
+        if (!hasWalk[0][i + 1]) curb.quad(P(s1, R1 + WALK_W, 0.02), P(s1, R1 + WALK_W, CURB_H + 0.02), P(s1, R1, CURB_H + 0.02), P(s1, R1, 0.02));
+      } else {
+        skirt.quad(P(s0, R0, 0.02), P(s0, R0 + 2, -6), P(s1, R1 + 2, -6), P(s1, R1, 0.02));
+      }
+      if (hasWalk[1][i]) {
+        curb.quad(P(s1, L1, 0.02), P(s0, L0, 0.02), P(s0, L0, CURB_H + 0.02), P(s1, L1, CURB_H + 0.02));
+        walk.quad(P(s0, L0 - WALK_W, CURB_H + 0.02), P(s0, L0, CURB_H + 0.02), P(s1, L1, CURB_H + 0.02), P(s1, L1 - WALK_W, CURB_H + 0.02), [0, v0, 1, v0, 1, v1, 0, v1]);
+        skirt.quad(P(s1, L1 - WALK_W, CURB_H + 0.02), P(s1, L1 - WALK_W - 2, -6), P(s0, L0 - WALK_W - 2, -6), P(s0, L0 - WALK_W, CURB_H + 0.02));
+        if (!hasWalk[1][i - 1]) curb.quad(P(s0, L0 - WALK_W, 0.02), P(s0, L0 - WALK_W, CURB_H + 0.02), P(s0, L0, CURB_H + 0.02), P(s0, L0, 0.02));
+        if (!hasWalk[1][i + 1]) curb.quad(P(s1, L1, 0.02), P(s1, L1, CURB_H + 0.02), P(s1, L1 - WALK_W, CURB_H + 0.02), P(s1, L1 - WALK_W, 0.02));
+      } else {
+        skirt.quad(P(s1, L1, 0.02), P(s1, L1 - 2, -6), P(s0, L0 - 2, -6), P(s0, L0, 0.02));
+      }
     }
   }
 
@@ -330,6 +443,12 @@ function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt) {
     new THREE.Mesh(deck.build(), concrete),
     new THREE.Mesh(rail.build(), new THREE.MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.6, side: THREE.DoubleSide })),
     new THREE.Mesh(pier.build(), concrete),
+  );
+  const walkTex = concreteTexture();
+  walkTex.anisotropy = asphalt.anisotropy;
+  group.add(
+    new THREE.Mesh(walk.build(), new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.95 })),
+    new THREE.Mesh(curb.build(), new THREE.MeshStandardMaterial({ color: 0xa8a49c, roughness: 0.9, side: THREE.DoubleSide })),
   );
 
   // White tied arches over the longest bridge (the Walterdale Bridge on the downtown route).
@@ -406,7 +525,7 @@ function buildMarkings(route) {
 function junctionBlend(route) {
   const CELL = 25;
   const grid = new Map();
-  const key = (x, z) => `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
+  const key = (x, z) => cellKey(Math.floor(x / CELL), Math.floor(z / CELL));
   for (let i = 0; i < route.n; i += 2) {
     const k = key(route.x[i], route.z[i]);
     if (!grid.has(k)) grid.set(k, []);
@@ -420,7 +539,7 @@ function junctionBlend(route) {
     let bd = Infinity;
     for (let a = -1; a <= 1; a++) {
       for (let b = -1; b <= 1; b++) {
-        for (const i of grid.get(`${cx + a},${cz + b}`) || []) {
+        for (const i of grid.get(cellKey(cx + a, cz + b)) || []) {
           const d = (route.x[i] - x) ** 2 + (route.z[i] - z) ** 2;
           if (d < bd) { bd = d; best = i; }
         }
@@ -497,6 +616,71 @@ function buildSideRoads(roads, heightAt, asphalt, route) {
 // ---------- buildings ----------
 const TOWER_TINTS = [0xb8c4d6, 0xd9c2a7, 0x9fb0a8, 0xc9a9a6, 0xa8b8d8, 0xe0ddd5];
 const HOUSE_TINTS = [0xf2e6d0, 0xd8dde3, 0xc9d6c3, 0xe8d3b8, 0xb9c4cf, 0xd7c6c0, 0xf0efe9];
+const ROOF_TINTS = [0x4a4d52, 0x5b4a3e, 0x3d4247, 0x6b5b4d, 0x2f3236, 0x5d6066];
+const FLAT_ROOF = 0x8d8b86;
+
+const polyArea = (ring) => {
+  let a = 0;
+  for (let k = 0; k < ring.length; k++) {
+    const [x1, z1] = ring[k];
+    const [x2, z2] = ring[(k + 1) % ring.length];
+    a += x1 * z2 - x2 * z1;
+  }
+  return Math.abs(a) / 2;
+};
+
+// Smallest rectangle around a footprint, trying each edge's direction.
+function orientedBox(ring) {
+  let best = null;
+  for (let k = 0; k < ring.length; k++) {
+    const [x1, z1] = ring[k];
+    const [x2, z2] = ring[(k + 1) % ring.length];
+    const len = Math.hypot(x2 - x1, z2 - z1);
+    if (len < 0.5) continue;
+    const ax = (x2 - x1) / len;
+    const az = (z2 - z1) / len;
+    let minA = Infinity; let maxA = -Infinity; let minB = Infinity; let maxB = -Infinity;
+    for (const [x, z] of ring) {
+      const a = x * ax + z * az;
+      const b = -x * az + z * ax;
+      minA = Math.min(minA, a); maxA = Math.max(maxA, a); minB = Math.min(minB, b); maxB = Math.max(maxB, b);
+    }
+    const area = (maxA - minA) * (maxB - minB);
+    if (!best || area < best.area) best = { area, ax, az, minA, maxA, minB, maxB };
+  }
+  if (!best) return null;
+  const { ax, az, minA, maxA, minB, maxB } = best;
+  const ca = (minA + maxA) / 2;
+  const cb = (minB + maxB) / 2;
+  let A = (maxA - minA) / 2;
+  let B = (maxB - minB) / 2;
+  let ux = ax; let uz = az; // long axis
+  if (B > A) {
+    [A, B] = [B, A];
+    ux = -az; uz = ax;
+  }
+  return { cx: ca * ax - cb * az, cz: ca * az + cb * ax, ux, uz, A, B, area: best.area };
+}
+
+function pointInRing(x, z, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, zi] = ring[i];
+    const [xj, zj] = ring[j];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = true !== inside;
+  }
+  return inside;
+}
+
+// Quad a-b-c-d whose front (visible) side faces along `hint`, whatever order the corners come in.
+const _e1 = new THREE.Vector3();
+const _e2 = new THREE.Vector3();
+function faceQuad(mb, a, b, c, d, uvs, col, hint) {
+  const n = _e1.subVectors(b, a).cross(_e2.subVectors(c, a));
+  if (n.dot(hint) >= 0) mb.quad(a, b, c, d, uvs, col, hint);
+  else mb.quad(a, d, c, b, [uvs[0], uvs[1], uvs[6], uvs[7], uvs[4], uvs[5], uvs[2], uvs[3]], col, hint);
+}
+const SOLID_UV = [0.97, 0.03, 0.97, 0.03, 0.97, 0.03, 0.97, 0.03];
 
 function buildBuildings(list, heightAt, occupancy) {
   const chunks = new Map();
@@ -505,8 +689,22 @@ function buildBuildings(list, heightAt, occupancy) {
     return chunks.get(key);
   };
   const color = new THREE.Color();
+  const roofColor = new THREE.Color();
+  const flat = new THREE.Color(FLAT_ROOF);
   const n = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0);
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  // A sloped roof face from an eave edge (a→b) up to the ridge (c→d), UVs in metres.
+  const roofFace = (mb, a, b, c, d, col) => {
+    const ex = b.x - a.x;
+    const ez = b.z - a.z;
+    const el = Math.hypot(ex, ez) || 1;
+    const along = (p) => ((p.x - a.x) * ex + (p.z - a.z) * ez) / el;
+    const slope = (p) => Math.hypot(p.x - (a.x + (ex * along(p)) / el), p.z - (a.z + (ez * along(p)) / el), p.y - a.y);
+    const nn = new THREE.Vector3().subVectors(b, a).cross(new THREE.Vector3().subVectors(c.equals(a) ? d : c, a)).normalize();
+    if (nn.y < 0) nn.negate();
+    faceQuad(mb, a, b, c, d, [along(a), slope(a) * 1.3, along(b), slope(b) * 1.3, along(c), slope(c) * 1.3, along(d), slope(d) * 1.3], col, nn);
+  };
   for (const b of list) {
     const h = b[0] / 10;
     let ring = [];
@@ -524,7 +722,6 @@ function buildBuildings(list, heightAt, occupancy) {
     cx /= ring.length;
     cz /= ring.length;
     base -= 0.5;
-    const top = base + 0.5 + h;
     const tower = h >= 12;
     const tints = tower ? TOWER_TINTS : HOUSE_TINTS;
     color.setHex(tints[Math.floor(hash(cx, cz) * tints.length)]);
@@ -538,9 +735,20 @@ function buildBuildings(list, heightAt, occupancy) {
     }
     if (out < 0) ring = ring.reverse();
 
-    const mb = getChunk(`${Math.floor(cx / 800)},${Math.floor(cz / 800)},${tower ? 't' : 'h'}`);
-    const winH = tower ? 3.5 : 3;
-    const winW = tower ? 3.5 : 4;
+    // Houses get a pitched (hip) roof when the footprint is roughly a rectangle.
+    const area = polyArea(ring);
+    const box = !tower && area < 900 ? orientedBox(ring) : null;
+    const pitched = box && area / box.area > 0.72 && box.B > 2;
+    const roofH = pitched ? Math.min(box.B * 0.55, h * 0.4, 4) : 0;
+    const top = base + 0.5 + h - roofH;
+    const parapet = !pitched ? (tower ? 1.0 : 0.6) : 0;
+    const roofY = top - parapet;
+
+    const chunkKey = `${Math.floor(cx / 800)},${Math.floor(cz / 800)}`;
+    const mb = getChunk(`${chunkKey},${tower ? 't' : 'h'}`);
+    // Texture tiles: towers 4 floors × 4 bays (3.5 m each), houses 1 storey × 2 bays.
+    const winH = tower ? 14 : 3;
+    const winW = tower ? 14 : 6;
     let u = 0;
     for (let k = 0; k < ring.length; k++) {
       const [x1, z1] = ring[k];
@@ -550,33 +758,95 @@ function buildBuildings(list, heightAt, occupancy) {
       n.set(-(z2 - z1) / len, 0, (x2 - x1) / len);
       const u1 = u + len / winW;
       const v1 = (top - base) / winH;
-      mb.quad(
-        new THREE.Vector3(x1, base, z1), new THREE.Vector3(x2, base, z2),
-        new THREE.Vector3(x2, top, z2), new THREE.Vector3(x1, top, z1),
-        [u, 0, u1, 0, u1, v1, u, v1], color, n,
-      );
+      mb.quad(V(x1, base, z1), V(x2, base, z2), V(x2, top, z2), V(x1, top, z1), [u, 0, u1, 0, u1, v1, u, v1], color, n);
+      if (parapet) {
+        // Inside face of the parapet, so the roof edge has thickness from above.
+        const i1x = x1 - n.x * 0.3;
+        const i1z = z1 - n.z * 0.3;
+        const i2x = x2 - n.x * 0.3;
+        const i2z = z2 - n.z * 0.3;
+        const inward = n.clone().negate();
+        faceQuad(mb, V(i2x, roofY, i2z), V(i1x, roofY, i1z), V(i1x, top, i1z), V(i2x, top, i2z), SOLID_UV, flat, inward);
+        faceQuad(mb, V(x1, top, z1), V(x2, top, z2), V(i2x, top, i2z), V(i1x, top, i1z), SOLID_UV, color, up);
+      }
       u = u1;
     }
-    // Flat roof.
+
+    if (pitched) {
+      // Hip roof on the footprint's rectangle, with a little eave overhang.
+      const roofs = getChunk(`${chunkKey},r`);
+      roofColor.setHex(ROOF_TINTS[Math.floor(hash(cz, cx) * ROOF_TINTS.length)]);
+      const A = box.A + 0.35;
+      const B = box.B + 0.35;
+      const ridge = Math.max(0, A - B);
+      const P = (a, bb, y) => V(box.cx + box.ux * a - box.uz * bb, y, box.cz + box.uz * a + box.ux * bb);
+      const eave = top - 0.15;
+      const peak = top + roofH;
+      const c00 = P(-A, -B, eave);
+      const c10 = P(A, -B, eave);
+      const c11 = P(A, B, eave);
+      const c01 = P(-A, B, eave);
+      const r0 = P(-ridge, 0, peak);
+      const r1 = P(ridge, 0, peak);
+      roofFace(roofs, c00, c10, r1, r0, roofColor);
+      roofFace(roofs, c11, c01, r0, r1, roofColor);
+      roofFace(roofs, c10, c11, r1, r1, roofColor);
+      roofFace(roofs, c01, c00, r0, r0, roofColor);
+      // Soffit under the overhang.
+      for (const [p, q] of [[c00, c10], [c10, c11], [c11, c01], [c01, c00]]) {
+        const ip = P(0, 0, eave);
+        faceQuad(mb, q, p, p.clone().lerp(ip, 0.04), q.clone().lerp(ip, 0.04), SOLID_UV, color, new THREE.Vector3(0, -1, 0));
+      }
+    }
+
+    // Flat roof (sunk below the parapet when there is one).
     const contour = ring.map(([x, z]) => new THREE.Vector2(x, z));
     const tris = THREE.ShapeUtils.triangulateShape(contour, []);
     const ab = new THREE.Vector3();
     const ac = new THREE.Vector3();
+    const flatY = pitched ? top - 0.2 : roofY;
     for (const [ia, ib, ic] of tris) {
-      const pa = new THREE.Vector3(ring[ia][0], top, ring[ia][1]);
-      const pb = new THREE.Vector3(ring[ib][0], top, ring[ib][1]);
-      const pc = new THREE.Vector3(ring[ic][0], top, ring[ic][1]);
+      const pa = V(ring[ia][0], flatY, ring[ia][1]);
+      const pb = V(ring[ib][0], flatY, ring[ib][1]);
+      const pc = V(ring[ic][0], flatY, ring[ic][1]);
       const upward = ab.subVectors(pb, pa).cross(ac.subVectors(pc, pa)).y >= 0;
-      for (const p of upward ? [pa, pb, pc] : [pa, pc, pb]) mb.vert(p, 0.97, 0.03, color, up);
+      for (const p of upward ? [pa, pb, pc] : [pa, pc, pb]) mb.vert(p, 0.97, 0.03, pitched ? color : flat, up);
+    }
+
+    // Rooftop units on big flat roofs.
+    if (!pitched && area > 350) {
+      const units = 1 + Math.floor(hash(cx * 3.1, cz * 1.7) * Math.min(4, area / 400));
+      for (let k = 0; k < units; k++) {
+        const px = cx + (hash(cx + k * 7.3, cz) - 0.5) * Math.sqrt(area) * 0.6;
+        const pz = cz + (hash(cz + k * 3.7, cx) - 0.5) * Math.sqrt(area) * 0.6;
+        if (!pointInRing(px, pz, ring)) continue;
+        const w = 2 + hash(px, pz) * 3;
+        const d = 1.5 + hash(pz, px) * 2.5;
+        const hh = 1.2 + hash(px * 2, pz) * 1.2;
+        const unit = new THREE.Color(0xb7b9bb);
+        const yb = roofY;
+        const c = [V(px - w / 2, 0, pz - d / 2), V(px + w / 2, 0, pz - d / 2), V(px + w / 2, 0, pz + d / 2), V(px - w / 2, 0, pz + d / 2)];
+        const wall = (p, q, nx, nz) => faceQuad(mb, V(p.x, yb, p.z), V(q.x, yb, q.z), V(q.x, yb + hh, q.z), V(p.x, yb + hh, p.z), SOLID_UV, unit, new THREE.Vector3(nx, 0, nz));
+        wall(c[1], c[0], 0, -1);
+        wall(c[2], c[1], 1, 0);
+        wall(c[3], c[2], 0, 1);
+        wall(c[0], c[3], -1, 0);
+        faceQuad(mb, V(c[0].x, yb + hh, c[0].z), V(c[3].x, yb + hh, c[3].z), V(c[2].x, yb + hh, c[2].z), V(c[1].x, yb + hh, c[1].z), SOLID_UV, unit, up);
+      }
     }
     occupancy.addPolygon(ring);
   }
   const towerTex = towerTexture();
   const houseTex = houseTexture();
+  const roofTex = shingleTexture();
   const towerMat = new THREE.MeshStandardMaterial({ map: towerTex, emissiveMap: towerTex, emissive: 0xffffff, emissiveIntensity: 0.3, vertexColors: true, roughness: 0.8 });
   const houseMat = new THREE.MeshStandardMaterial({ map: houseTex, emissiveMap: houseTex, emissive: 0xffffff, emissiveIntensity: 0.12, vertexColors: true, roughness: 0.9 });
+  const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, vertexColors: true, roughness: 0.95 });
   const group = new THREE.Group();
-  for (const [key, mb] of chunks) group.add(new THREE.Mesh(mb.build(), key.endsWith('t') ? towerMat : houseMat));
+  for (const [key, mb] of chunks) {
+    const mat = key.endsWith('t') ? towerMat : key.endsWith('r') ? roofMat : houseMat;
+    group.add(new THREE.Mesh(mb.build(), mat));
+  }
   return group;
 }
 
@@ -586,7 +856,7 @@ class Occupancy {
     this.cell = cell;
     this.set = new Set();
   }
-  key(x, z) { return `${Math.floor(x / this.cell)},${Math.floor(z / this.cell)}`; }
+  key(x, z) { return cellKey(Math.floor(x / this.cell), Math.floor(z / this.cell)); }
   mark(x, z) { this.set.add(this.key(x, z)); }
   has(x, z) { return this.set.has(this.key(x, z)); }
   addPolygon(ring) {
@@ -607,6 +877,34 @@ class Occupancy {
 }
 
 // ---------- trees, street lights, finish banner ----------
+// Shapes are merged once and drawn instanced: one draw call per part for every tree.
+const plainGeo = (g) => {
+  const p = g.index ? g.toNonIndexed() : g;
+  for (const name of Object.keys(p.attributes)) if (!['position', 'normal'].includes(name)) p.deleteAttribute(name);
+  return p;
+};
+function treeGeometries() {
+  // White spruce: stacked, slightly drooping tiers.
+  const tiers = [[2.1, 2.2, 1.6], [1.75, 2.0, 2.9], [1.35, 1.9, 4.1], [0.95, 1.8, 5.2], [0.5, 1.6, 6.2]];
+  const spruce = mergeGeometries(tiers.map(([r, h, y]) => plainGeo(new THREE.ConeGeometry(r, h, 9).translate(0, y + h / 2, 0))));
+  // Broadleaf (elm/maple/ash): a cluster of lumpy blobs.
+  const blobs = [[2.0, 0, 4.3, 0], [1.5, 1.2, 3.9, 0.5], [1.55, -1.1, 4.1, -0.5], [1.3, 0.3, 5.4, 0.2], [1.2, -0.3, 4.0, 1.2]];
+  const leafy = mergeGeometries(blobs.map(([r, x, y, z]) => plainGeo(new THREE.IcosahedronGeometry(r, 1).translate(x, y, z))));
+  // Trembling aspen: tall narrow crown.
+  const aspen = mergeGeometries([
+    plainGeo(new THREE.IcosahedronGeometry(1, 1).scale(1.3, 2.4, 1.3).translate(0, 5.6, 0)),
+    plainGeo(new THREE.IcosahedronGeometry(1, 1).scale(1.0, 1.4, 1.0).translate(0.4, 7.3, 0.2)),
+  ]);
+  // Trunk with two short limbs into the crown.
+  const trunk = mergeGeometries([
+    plainGeo(new THREE.CylinderGeometry(0.11, 0.2, 3.6, 7).translate(0, 1.8, 0)),
+    plainGeo(new THREE.CylinderGeometry(0.05, 0.08, 1.4, 5).rotateZ(0.7).translate(0.45, 3.4, 0)),
+    plainGeo(new THREE.CylinderGeometry(0.05, 0.08, 1.3, 5).rotateZ(-0.6).rotateY(1.2).translate(-0.2, 3.5, 0.35)),
+  ]);
+  for (const g of [spruce, leafy, aspen, trunk]) g.computeVertexNormals();
+  return { spruce, leafy, aspen, trunk };
+}
+
 function buildTrees(route, heightAt, occupancy, waterLevel) {
   const spots = [];
   for (let s = 20; s < route.length; s += 7) {
@@ -618,53 +916,62 @@ function buildTrees(route, heightAt, occupancy, waterLevel) {
       if (occupancy.has(p.x, p.z)) continue;
       const g = heightAt(p.x, p.z);
       if (g == null || g < waterLevel + 0.5) continue;
-      spots.push([p.x, g, p.z, hash(p.x, p.z)]);
+      spots.push([p.x, g, p.z, hash(p.x, p.z), hash(p.z * 1.7, p.x * 0.3)]);
     }
   }
-  const spruce = spots.filter((t) => t[3] < 0.45);
-  const leafy = spots.filter((t) => t[3] >= 0.45);
+  const kind = (r) => (r < 0.4 ? 'spruce' : r < 0.8 ? 'leafy' : 'aspen');
+  const geos = treeGeometries();
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const sc = new THREE.Vector3();
   const v = new THREE.Vector3();
   const c = new THREE.Color();
-  const autumn = [0xe0a326, 0xd9772b, 0xc4432b, 0xb8b33a, 0x7f9a3a];
-
-  const trunks = new THREE.InstancedMesh(
-    new THREE.CylinderGeometry(0.2, 0.3, 2.4, 6).translate(0, 1.2, 0),
-    new THREE.MeshStandardMaterial({ color: 0x5a3d2b }),
-    Math.max(1, spots.length),
-  );
-  const cones = new THREE.InstancedMesh(
-    new THREE.ConeGeometry(2.2, 7, 7).translate(0, 5.5, 0),
-    new THREE.MeshStandardMaterial({ roughness: 0.9 }),
-    Math.max(1, spruce.length),
-  );
-  const blobs = new THREE.InstancedMesh(
-    new THREE.IcosahedronGeometry(2.6, 0).translate(0, 4.2, 0),
-    new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }),
-    Math.max(1, leafy.length),
-  );
-  spots.forEach(([x, y, z, r], i) => {
-    const s = 0.8 + r * 0.6;
-    trunks.setMatrixAt(i, m.compose(v.set(x, y, z), q, sc.set(s, s, s)));
+  const yAxis = new THREE.Vector3(0, 1, 0);
+  const autumn = [0xe0a326, 0xd9772b, 0xc4432b, 0xb8b33a, 0x7f9a3a, 0xe8c43a];
+  const crowns = {};
+  for (const k of ['spruce', 'leafy', 'aspen']) {
+    const list = spots.filter((t) => kind(t[3]) === k);
+    crowns[k] = { list, mesh: new THREE.InstancedMesh(geos[k], new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }), Math.max(1, list.length)) };
+  }
+  const trunks = new THREE.InstancedMesh(geos.trunk, new THREE.MeshStandardMaterial({ roughness: 0.95 }), Math.max(1, spots.length));
+  spots.forEach(([x, y, z, r, r2], i) => {
+    const k = kind(r);
+    const s = k === 'spruce' ? 0.8 + r2 * 0.7 : 0.75 + r2 * 0.55;
+    q.setFromAxisAngle(yAxis, r2 * 6.28);
+    m.compose(v.set(x, y - 0.1, z), q, sc.set(s, s * (k === 'aspen' ? 1.1 : 1), s));
+    trunks.setMatrixAt(i, m);
+    trunks.setColorAt(i, c.setHex(k === 'aspen' ? 0xd9d6c8 : k === 'spruce' ? 0x4a3527 : 0x5a3d2b));
   });
-  spruce.forEach(([x, y, z, r], i) => {
-    const s = 0.8 + r * 0.8;
-    cones.setMatrixAt(i, m.compose(v.set(x, y, z), q, sc.set(s, s, s)));
-    cones.setColorAt(i, c.setHex(0x2f5a3a).offsetHSL(0, 0, (r - 0.2) * 0.15));
-  });
-  leafy.forEach(([x, y, z, r], i) => {
-    const s = 0.8 + (r - 0.45) * 1.2;
-    blobs.setMatrixAt(i, m.compose(v.set(x, y, z), q, sc.set(s, s * 0.9, s)));
-    blobs.setColorAt(i, c.setHex(autumn[Math.floor(r * 1000) % autumn.length]));
-  });
+  for (const [k, { list, mesh }] of Object.entries(crowns)) {
+    list.forEach(([x, y, z, r, r2], i) => {
+      const s = k === 'spruce' ? 0.8 + r2 * 0.7 : 0.75 + r2 * 0.55;
+      q.setFromAxisAngle(yAxis, r2 * 6.28);
+      mesh.setMatrixAt(i, m.compose(v.set(x, y - 0.1, z), q, sc.set(s, s * (k === 'aspen' ? 1.1 : 1), s)));
+      if (k === 'spruce') c.setHex(0x2f5a3a).offsetHSL(0, 0, (r2 - 0.5) * 0.08);
+      else if (k === 'aspen') c.setHex(r2 < 0.5 ? 0xf0c93a : 0xe3b52e);
+      else c.setHex(autumn[Math.floor(r2 * 1000) % autumn.length]);
+      mesh.setColorAt(i, c);
+    });
+    mesh.count = list.length;
+  }
   trunks.count = spots.length;
-  cones.count = spruce.length;
-  blobs.count = leafy.length;
   const group = new THREE.Group();
-  group.add(trunks, cones, blobs);
+  group.add(trunks, ...Object.values(crowns).map((x) => x.mesh));
   return group;
+}
+
+// Edmonton-style davit street light: tapered pole, curved arm, cobra-head lamp.
+function streetLightGeometries() {
+  const armCurve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 8.2, 0), new THREE.Vector3(0, 9.4, 0), new THREE.Vector3(-2.4, 9.3, 0));
+  const pole = mergeGeometries([
+    plainGeo(new THREE.CylinderGeometry(0.09, 0.15, 8.4, 8).translate(0, 4.2, 0)),
+    plainGeo(new THREE.CylinderGeometry(0.24, 0.26, 0.5, 8).translate(0, 0.25, 0)),
+    plainGeo(new THREE.TubeGeometry(armCurve, 10, 0.065, 6, false)),
+    plainGeo(new THREE.SphereGeometry(1, 12, 6).scale(0.62, 0.17, 0.3).translate(-2.75, 9.25, 0)),
+  ]);
+  pole.computeVertexNormals();
+  const lens = plainGeo(new THREE.CircleGeometry(1, 12).scale(0.45, 0.2, 1).rotateX(Math.PI / 2).translate(-2.78, 9.1, 0));
+  return { pole, lens };
 }
 
 function buildStreetLights(route) {
@@ -673,14 +980,11 @@ function buildStreetLights(route) {
   for (let s = 30; s < route.length - 120; s += 50) {
     if (route.cls[route.idx(s)] >= 1) spots.push(s);
   }
-  const poleMat = new THREE.MeshStandardMaterial({ color: 0x2b2e35, roughness: 0.6 });
-  const lampMat = new THREE.MeshStandardMaterial({ color: 0xffe2a8, emissive: 0xffd27a, emissiveIntensity: 2 });
+  const geos = streetLightGeometries();
+  const poleMat = new THREE.MeshStandardMaterial({ color: 0x6e737a, roughness: 0.45, metalness: 0.6 });
+  const lampMat = new THREE.MeshStandardMaterial({ color: 0xffe2a8, emissive: 0xffd27a, emissiveIntensity: 2.2, side: THREE.DoubleSide });
   const count = Math.max(1, spots.length);
-  const meshes = [
-    new THREE.InstancedMesh(new THREE.CylinderGeometry(0.12, 0.15, 8, 6).translate(0, 4, 0), poleMat, count),
-    new THREE.InstancedMesh(new THREE.BoxGeometry(2.2, 0.12, 0.12).translate(-1.1, 8, 0), poleMat, count),
-    new THREE.InstancedMesh(new THREE.BoxGeometry(0.8, 0.15, 0.4).translate(-2.1, 7.9, 0), lampMat, count),
-  ];
+  const meshes = [new THREE.InstancedMesh(geos.pole, poleMat, count), new THREE.InstancedMesh(geos.lens, lampMat, count)];
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const one = new THREE.Vector3(1, 1, 1);
@@ -750,7 +1054,7 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
 
   group.add(
     ...buildTerrain(data.terrain, heights, data.water),
-    buildRouteRoad(route, heightAt, data.water, data.id === 'home', asphalt),
+    buildRouteRoad(route, heightAt, data.water, data.id === 'home', asphalt, data.roads),
     buildMarkings(route),
     buildSideRoads(data.roads, heightAt, asphalt, route),
     buildBuildings(data.buildings, heightAt, occupancy),

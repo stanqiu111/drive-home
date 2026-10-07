@@ -13,14 +13,18 @@ import { Ending } from './ending.js';
 import { buildFun, FUN_RIDES, FUN_IDS } from './funrides.js';
 import { readInput, setupTouch, isTouch } from './input.js';
 
-const MAPS = [
-  { id: 'home', name: 'Downtown', sub: 'Home · Gateway Blvd & Walterdale Bridge', km: 15.6, cheer: 'FINALLY HOME!!', ending: 'game' },
-  { id: 'windermere', name: 'Windermere', sub: 'West along Ellerslie Rd', km: 11.3, cheer: 'MADE IT!!', ending: 'shopping' },
-  { id: 'sherwood', name: 'Sherwood Park', sub: 'Anthony Henday, east', km: 22.2, cheer: 'MADE IT!!', ending: 'bbq' },
-  { id: 'burger', name: 'Odd Burger', sub: 'Quick burger run on Ellerslie Rd', km: 1.5, cheer: 'MADE IT!!', ending: 'burger' },
-  { id: 'beachclub', name: 'Summerside Beach Club', sub: 'Residents’ lake club, around the corner', km: 1.6, cheer: 'MADE IT!!', ending: 'beach' },
-  { id: 'noodle', name: 'Noodle Feast', sub: 'Parsons Place, up 99 St', km: 7.1, cheer: 'MADE IT!!', ending: 'noodle' },
-];
+// Game-side flavour per map. Names, distances and route facts come from maps/index.json,
+// which tools/build-maps.mjs writes.
+const MAP_INFO = {
+  home: { sub: 'Home · Gateway Blvd & Walterdale Bridge', cheer: 'FINALLY HOME!!', ending: 'game' },
+  windermere: { sub: 'West along Ellerslie Rd', cheer: 'MADE IT!!', ending: 'shopping' },
+  sherwood: { sub: 'Anthony Henday, east', cheer: 'MADE IT!!', ending: 'bbq' },
+  burger: { sub: 'Quick burger run on Ellerslie Rd', cheer: 'MADE IT!!', ending: 'burger' },
+  beachclub: { sub: 'Residents’ lake club, around the corner', cheer: 'MADE IT!!', ending: 'beach' },
+  noodle: { sub: 'Parsons Place, up 99 St', cheer: 'MADE IT!!', ending: 'noodle' },
+};
+const mapIndex = await (await fetch('maps/index.json')).json();
+const MAPS = mapIndex.map((meta) => ({ sub: '', cheer: 'MADE IT!!', ending: 'bbq', ...meta, ...MAP_INFO[meta.id] }));
 
 const BASE_SPEED = 45; // m/s ≈ 162 km/h before car stats
 const NITRO_BONUS = 21; // m/s on top of the car's top speed
@@ -189,10 +193,62 @@ async function selectMap(id) {
   ui.loading.classList.remove('show');
 }
 
+// A small north-up map of the route for the menu tile (cached per map).
+const thumbCache = new Map();
+function routeThumb(m) {
+  if (thumbCache.has(m.id)) return thumbCache.get(m.id);
+  const W = 160;
+  const H = 100;
+  const c = document.createElement('canvas');
+  c.width = W * 2;
+  c.height = H * 2;
+  const g = c.getContext('2d');
+  g.scale(2, 2);
+  const xs = m.poly.map((p) => p[0]);
+  const zs = m.poly.map((p) => p[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minZ = Math.min(...zs);
+  const maxZ = Math.max(...zs);
+  const pad = 12;
+  const k = Math.min((W - pad * 2) / Math.max(1, maxX - minX), (H - pad * 2) / Math.max(1, maxZ - minZ));
+  const offX = (W - (maxX - minX) * k) / 2;
+  const offZ = (H - (maxZ - minZ) * k) / 2;
+  const X = (x) => offX + (x - minX) * k;
+  const Y = (z) => offZ + (z - minZ) * k; // z grows southwards, so north is up
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  g.strokeStyle = 'rgba(0,0,0,0.45)';
+  g.lineWidth = 6;
+  g.beginPath();
+  m.poly.forEach(([x, z], i) => (i ? g.lineTo(X(x), Y(z)) : g.moveTo(X(x), Y(z))));
+  g.stroke();
+  g.strokeStyle = '#ffb347';
+  g.lineWidth = 3;
+  g.stroke();
+  const dot = (x, z, fill) => {
+    g.beginPath();
+    g.arc(X(x), Y(z), 4, 0, Math.PI * 2);
+    g.fillStyle = fill;
+    g.fill();
+    g.strokeStyle = '#fff';
+    g.lineWidth = 1.5;
+    g.stroke();
+  };
+  const [sx, sz] = m.poly[0];
+  const [ex, ez] = m.poly[m.poly.length - 1];
+  dot(sx, sz, '#5fd4ff');
+  dot(ex, ez, '#ff5e3a');
+  const url = c.toDataURL();
+  thumbCache.set(m.id, url);
+  return url;
+}
+
 function renderMenu() {
   ui.mapList.innerHTML = MAPS.map((m) => {
     const best = loadBest(m.id);
-    return `<button class="tile ${m.id === prefs.map ? 'sel' : ''}" data-map="${m.id}">
+    return `<button class="tile map ${m.id === prefs.map ? 'sel' : ''}" data-map="${m.id}">
+      <img class="thumb" src="${routeThumb(m)}" alt="" width="160" height="100" />
       <b>${m.name}</b><span>${m.sub}</span>
       <small>${m.km} km${best ? ` · best ${fmt(best)}` : ''}</small></button>`;
   }).join('');

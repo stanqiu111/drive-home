@@ -24,6 +24,8 @@ const OUT = path.join(ROOT, 'public/maps');
 const PBF = path.join(CACHE, 'alberta-latest.osm.pbf');
 const UA = 'DriveHomeGame/0.1 (personal hobby project)';
 
+// Every map has a public start point (never a private address). Maps without `start`
+// begin in Summerside; the `from` label groups them in the menu.
 const START = [-113.4804231, 53.4156855]; // 91 St SW, Summerside (public spot)
 const MAPS = [
   { id: 'home', name: 'Downtown', dest: [-113.5066314, 53.5335503] }, // by the Legislature
@@ -49,7 +51,51 @@ const HIGHWAYS = new Set([
   'motorway_link', 'trunk_link', 'primary_link', 'secondary_link', 'tertiary_link',
 ]);
 const WAY_KEYS = ['highway', 'lanes', 'lanes:forward', 'lanes:backward', 'oneway', 'junction', 'bridge', 'layer',
-  'name', 'ref', 'building', 'height', 'building:levels'];
+  'name', 'ref', 'building', 'height', 'building:levels', 'building:colour', 'roof:shape', 'amenity', 'shop', 'tourism',
+  'leisure', 'office', 'brand', 'landuse', 'natural', 'water', 'parking', 'man_made', 'operator'];
+
+// Building classes written to the map files (the renderer picks a style per class).
+const CLASS = {
+  unknown: 0, house: 1, rowhouse: 2, apartments: 3, retail: 4, industrial: 5, office: 6, civic: 7, outbuilding: 8,
+  hotel: 9, parking: 10, church: 11, school: 12, bigbox: 13,
+};
+const OSM_CLASS = {
+  house: 'house', detached: 'house', semidetached_house: 'house', residential: 'house', bungalow: 'house', cabin: 'house',
+  terrace: 'rowhouse', townhouse: 'rowhouse',
+  apartments: 'apartments', dormitory: 'apartments',
+  commercial: 'retail', retail: 'retail', supermarket: 'bigbox', kiosk: 'retail',
+  industrial: 'industrial', warehouse: 'industrial', manufacture: 'industrial', service: 'industrial', hangar: 'industrial',
+  office: 'office',
+  public: 'civic', civic: 'civic', government: 'civic', hospital: 'civic', train_station: 'civic', transportation: 'civic',
+  fire_station: 'civic', pavilion: 'civic', stadium: 'civic', sports_centre: 'civic', sports_hall: 'civic',
+  garage: 'outbuilding', garages: 'outbuilding', shed: 'outbuilding', carport: 'outbuilding', roof: 'outbuilding', hut: 'outbuilding',
+  outbuilding: 'outbuilding', allotment_house: 'outbuilding', guardhouse: 'outbuilding', farm_auxiliary: 'outbuilding',
+  hotel: 'hotel',
+  parking: 'parking',
+  church: 'church', religious: 'church', chapel: 'church', mosque: 'church', temple: 'church', cathedral: 'church',
+  school: 'school', college: 'school', university: 'school', kindergarten: 'school',
+};
+// Class from OSM tags; `null` when the tags don't say.
+function osmClass(t) {
+  if (!t) return null;
+  if (t.amenity === 'place_of_worship') return 'church';
+  if (['school', 'college', 'university', 'kindergarten'].includes(t.amenity)) return 'school';
+  if (t.tourism === 'hotel' || t.tourism === 'motel') return 'hotel';
+  if (t.amenity === 'parking' || t.parking) return 'parking';
+  if (t.shop && !OSM_CLASS[t.building]) return 'retail';
+  if (t.office && (t.building === 'yes' || !t.building)) return 'office';
+  return OSM_CLASS[t.building] ?? null;
+}
+// Fallback by size when nothing is tagged.
+function guessClass(area, h) {
+  if (h >= 30) return 'office';
+  if (area < 80 && h < 5) return 'outbuilding';
+  if (area < 320 && h < 12) return 'house';
+  if (area >= 2500 && h < 16) return 'bigbox';
+  if (h >= 14) return 'apartments';
+  if (area >= 700) return 'retail';
+  return 'unknown';
+}
 
 fs.mkdirSync(CACHE, { recursive: true });
 fs.mkdirSync(OUT, { recursive: true });
@@ -57,7 +103,9 @@ fs.mkdirSync(OUT, { recursive: true });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(...a);
 
-// ---------- projection: local metres, x = east, z = south, origin = START ----------
+// ---------- projection: local metres, x = east, z = south ----------
+// One global projection (origin = Summerside START) is used while reading data; each
+// map's output is then shifted so its own start point sits at (0, 0).
 const DEG = Math.PI / 180;
 const mLat = (p) => 111132.954 - 559.822 * Math.cos(2 * p * DEG) + 1.175 * Math.cos(4 * p * DEG);
 const mLon = (p) => 111412.84 * Math.cos(p * DEG) - 93.5 * Math.cos(3 * p * DEG) + 0.118 * Math.cos(5 * p * DEG);
@@ -158,6 +206,16 @@ function segDist(px, pz, ax, az, bx, bz) {
 }
 
 // Douglas–Peucker on a closed ring of [x,z].
+function pointInRing(x, z, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, zi] = ring[i];
+    const [xj, zj] = ring[j];
+    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
 function simplifyRing(ring, tol) {
   if (ring.length <= 4) return ring;
   const keep = new Uint8Array(ring.length);
@@ -227,7 +285,7 @@ class RouteIndex {
 async function loadRoute(m) {
   const coords = await cached(`route-${m.id}.json`, async () => {
     log(`  fetching route from OSRM…`);
-    const u = `https://router.project-osrm.org/route/v1/driving/${START.join(',')};${m.dest.join(',')}?overview=full&geometries=geojson`;
+    const u = `https://router.project-osrm.org/route/v1/driving/${(m.start ?? START).join(',')};${m.dest.join(',')}?overview=full&geometries=geojson`;
     const j = await getJSON(u);
     await sleep(1100);
     return j.routes[0].geometry.coordinates;
@@ -311,7 +369,8 @@ async function extractOSM(routes) {
         if (!t) continue;
         const isRoad = HIGHWAYS.has(t.highway);
         const isBuilding = !!t.building && !isRoad;
-        if (!isRoad && !isBuilding) continue;
+        const isArea = !isRoad && !isBuilding && (t.landuse || t.natural === 'water' || t.water || t.leisure === 'park' || t.amenity === 'parking');
+        if (!isRoad && !isBuilding && !isArea) continue;
         const c = [];
         let ok = true;
         for (const ref of item.refs) {
@@ -321,7 +380,7 @@ async function extractOSM(routes) {
         }
         if (!ok || c.length < 4) continue;
         let near = false;
-        if (isRoad) {
+        if (isRoad || isArea) {
           for (let i = 0; i < c.length && !near; i += 2) near = inRoad(...project(c[i], c[i + 1]));
         } else {
           near = inBuilding(...project(c[0], c[1]));
@@ -466,8 +525,13 @@ function osmHeight(t) {
   return OSM_HEIGHTS[t.building] ?? 6;
 }
 
-async function buildMap(m, pts, osm) {
+async function buildMap(m, ptsGlobal, osm) {
   log(`\n== ${m.name} (${m.id})`);
+  const start = m.start ?? START;
+  const [ox, oz] = project(...start);
+  const P = (lon, lat) => { const [x, z] = project(lon, lat); return [x - ox, z - oz]; };
+  const U = (x, z) => unproject(x + ox, z + oz);
+  const pts = ptsGlobal.map(([x, z]) => [x - ox, z - oz]);
   const N = pts.length;
   const index = new RouteIndex(pts);
 
@@ -486,7 +550,7 @@ async function buildMap(m, pts, osm) {
   // Project OSM roads and build a segment hash for matching.
   const roads = osm.ways.filter((w) => HIGHWAYS.has(w.t.highway)).map((w) => {
     const p = [];
-    for (let i = 0; i < w.c.length; i += 2) p.push(project(w.c[i], w.c[i + 1]));
+    for (let i = 0; i < w.c.length; i += 2) p.push(P(w.c[i], w.c[i + 1]));
     return { t: w.t, p };
   });
   const SEG_CELL = 25;
@@ -583,12 +647,12 @@ async function buildMap(m, pts, osm) {
   const nz = Math.ceil((maxZ + TERRAIN_RADIUS - gz0) / CELL) + 1;
   log(`  terrain grid ${nx}×${nz}, sampling elevation…`);
   const gridLL = [];
-  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) gridLL.push(unproject(gx0 + i * CELL, gz0 + j * CELL));
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) gridLL.push(U(gx0 + i * CELL, gz0 + j * CELL));
   const dem = await sampleDEM(gridLL);
 
   // Route elevation: smoothed DEM, straight lines across bridges.
-  const routeLL = pts.map(([x, z]) => unproject(x, z));
-  const elev0 = (await sampleDEM([START]))[0];
+  const routeLL = pts.map(([x, z]) => U(x, z));
+  const elev0 = (await sampleDEM([start]))[0];
   let ry = (await sampleDEM(routeLL)).map((e) => e - elev0);
   ry = smoothArr(ry, 15);
   for (let i = 0; i < N; i++) {
@@ -702,7 +766,7 @@ async function buildMap(m, pts, osm) {
   log(`  ${otherRoads.length} side road pieces`);
 
   // Buildings.
-  const city = await loadRooflines(m, pts);
+  const city = await loadRooflines(m, ptsGlobal);
   const cityCells = new Set();
   const endI = N - 1;
   const endRight = right[endI];
@@ -719,8 +783,57 @@ async function buildMap(m, pts, osm) {
     }
     return true;
   };
+  // OSM buildings and land-use areas, projected, in a grid so city footprints can look up
+  // what OpenStreetMap says about them (type, name).
+  const osmBuildings = [];
+  const areas = [];
+  for (const w of osm.ways) {
+    if (HIGHWAYS.has(w.t.highway)) continue;
+    const ring = [];
+    for (let i = 0; i < w.c.length; i += 2) ring.push(P(w.c[i], w.c[i + 1]));
+    if (ring.length < 3) continue;
+    if (w.t.building) osmBuildings.push({ t: w.t, ring });
+    else areas.push({ t: w.t, ring });
+  }
+  const polyGrid = (list, cell) => {
+    const grid = new Map();
+    list.forEach((item, idx) => {
+      const xs = item.ring.map((p) => p[0]);
+      const zs = item.ring.map((p) => p[1]);
+      item.box = [arrMin(xs), arrMin(zs), arrMax(xs), arrMax(zs)];
+      for (let i = Math.floor(item.box[0] / cell); i <= Math.floor(item.box[2] / cell); i++) {
+        for (let j = Math.floor(item.box[1] / cell); j <= Math.floor(item.box[3] / cell); j++) {
+          const k = `${i},${j}`;
+          if (!grid.has(k)) grid.set(k, []);
+          grid.get(k).push(idx);
+        }
+      }
+    });
+    return (x, z) => {
+      const out = [];
+      for (const idx of grid.get(`${Math.floor(x / cell)},${Math.floor(z / cell)}`) ?? []) {
+        const it = list[idx];
+        if (x >= it.box[0] && x <= it.box[2] && z >= it.box[1] && z <= it.box[3] && pointInRing(x, z, it.ring)) out.push(it);
+      }
+      return out;
+    };
+  };
+  const osmAt = polyGrid(osmBuildings, 50);
+  const areaAt = polyGrid(areas, 200);
+  const landuseAt = (x, z) => {
+    let best = null;
+    for (const a of areaAt(x, z)) {
+      const lu = a.t.landuse || (a.t.leisure === 'park' ? 'park' : a.t.amenity === 'parking' ? 'parking' : null);
+      if (!lu) continue;
+      const size = (a.box[2] - a.box[0]) * (a.box[3] - a.box[1]);
+      if (!best || size < best.size) best = { lu, size }; // the smallest (most specific) area wins
+    }
+    return best?.lu ?? null;
+  };
+
   const buildings = [];
-  const addBuilding = (ring, h, tall) => {
+  const classCount = {};
+  const addBuilding = (ring, h, tall, tags) => {
     if (ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1]) ring = ring.slice(0, -1);
     ring = simplifyRing(ring, 0.4);
     if (ring.length < 3 || ringArea(ring) < 20) return;
@@ -729,30 +842,48 @@ async function buildMap(m, pts, osm) {
     const nr = index.nearest(cx, cz, BUILDING_RADIUS);
     if (!nr && !(tall && index.nearest(cx, cz, SKYLINE_RADIUS))) return;
     if (!keepBuilding(ring)) return;
-    buildings.push([Math.round(h * 10), ...ring.flatMap(([x, z]) => [Math.round(x * 10), Math.round(z * 10)])]);
+    // What OpenStreetMap knows about this footprint (city footprints: whichever OSM building contains its centre).
+    let t = tags;
+    if (!t) {
+      const hits = osmAt(cx, cz);
+      if (hits.length) t = hits[0].t;
+    }
+    const area = ringArea(ring);
+    let cls = osmClass(t);
+    if (!cls) {
+      const lu = landuseAt(cx, cz);
+      if (lu === 'industrial') cls = h < 30 ? 'industrial' : 'office';
+      else if (lu === 'retail' || lu === 'commercial') cls = h >= 30 ? 'office' : area >= 2500 ? 'bigbox' : 'retail';
+      else if (lu === 'residential') cls = area < 400 && h < 12 ? (area < 80 && h < 5 ? 'outbuilding' : 'house') : h >= 12 ? 'apartments' : area >= 400 ? 'rowhouse' : 'house';
+      else cls = guessClass(area, h);
+    }
+    classCount[cls] = (classCount[cls] || 0) + 1;
+    const b = { h: Math.round(h * 10), c: CLASS[cls], p: ring.flatMap(([x, z]) => [Math.round(x * 10), Math.round(z * 10)]) };
+    const name = t?.name || t?.brand;
+    if (name && area > 150) b.n = name;
+    if (t?.['building:levels'] > 0) b.l = parseInt(t['building:levels'], 10);
+    if (t?.['roof:shape']) b.r = t['roof:shape'];
+    buildings.push(b);
     return [cx, cz];
   };
   for (const b of city) {
-    const ring = b.ring.map(([lon, lat]) => project(lon, lat));
-    const c = addBuilding(ring, b.h, b.h > SKYLINE_MIN_H);
+    const ring = b.ring.map(([lon, lat]) => P(lon, lat));
+    const c = addBuilding(ring, b.h, b.h > SKYLINE_MIN_H, null);
     if (c) cityCells.add(`${Math.floor(c[0] / 100)},${Math.floor(c[1] / 100)}`);
   }
   let osmCount = 0;
-  for (const w of osm.ways) {
-    if (!w.t.building || HIGHWAYS.has(w.t.highway)) continue;
-    const ring = [];
-    for (let i = 0; i < w.c.length; i += 2) ring.push(project(w.c[i], w.c[i + 1]));
-    const cx = ring[0][0];
-    const cz = ring[0][1];
+  for (const w of osmBuildings) {
+    const cx = w.ring[0][0];
+    const cz = w.ring[0][1];
     if (cityCells.has(`${Math.floor(cx / 100)},${Math.floor(cz / 100)}`)) continue;
-    if (addBuilding(ring, osmHeight(w.t), false)) osmCount++;
+    if (addBuilding(w.ring, osmHeight(w.t), false, w.t)) osmCount++;
   }
-  log(`  ${buildings.length} buildings (${osmCount} from OpenStreetMap)`);
+  log(`  ${buildings.length} buildings (${osmCount} from OpenStreetMap): ${JSON.stringify(classCount)}`);
 
   // Traffic signals on the route.
   const signals = [];
   for (const [lon, lat] of osm.signals) {
-    const [x, z] = project(lon, lat);
+    const [x, z] = P(lon, lat);
     const nr = index.nearest(x, z, 30);
     if (!nr) continue;
     if (Math.abs(lateral(nr.i, x, z)) > Math.max(right[nr.i], -left[nr.i]) + 15) continue;
@@ -766,7 +897,7 @@ async function buildMap(m, pts, osm) {
   const out = {
     id: m.id,
     name: m.name,
-    origin: START,
+    origin: start,
     step: STEP,
     route: {
       x: pts.map((p) => r2(p[0])),
@@ -789,6 +920,35 @@ async function buildMap(m, pts, osm) {
   const file = path.join(OUT, `${m.id}.json`);
   fs.writeFileSync(file, JSON.stringify(out));
   log(`  wrote ${path.relative(ROOT, file)} (${(fs.statSync(file).size / 1e6).toFixed(1)} MB)`);
+
+  // Menu metadata: a simplified polyline for the preview map, plus route facts.
+  const poly = simplifyRing(pts, 12).map(([x, z]) => [Math.round(x), Math.round(z)]);
+  let curves = 0;
+  for (let i = 30; i < N - 30; i += 30) {
+    const a = Math.atan2(tz[i - 30], tx[i - 30]);
+    const b = Math.atan2(tz[i + 30], tx[i + 30]);
+    let d = Math.abs(b - a);
+    if (d > Math.PI) d = 2 * Math.PI - d;
+    if (d > 0.5) curves++;
+  }
+  let bridgeM = 0;
+  for (const b of bridgeClean) if (b) bridgeM += STEP;
+  let climb = 0;
+  for (let i = 1; i < N; i++) climb += Math.max(0, ry[i] - ry[i - 1]);
+  const highwayM = cls.filter((c) => c === 3).length * STEP;
+  return {
+    id: m.id,
+    name: m.name,
+    from: m.from ?? 'Summerside',
+    km: Math.round((N * STEP) / 100) / 10,
+    poly,
+    streets: nameRuns.map((r) => r[1]).filter((v, i, a) => v && a.indexOf(v) === i),
+    signals: signals.length,
+    curves,
+    bridgeM,
+    highwayM,
+    climb: Math.round(climb),
+  };
 }
 
 // ---------- main ----------
@@ -800,6 +960,14 @@ for (const m of MAPS) {
   allRoutes.push(await loadRoute(m));
 }
 const osm = await extractOSM(allRoutes);
-for (const m of maps) await buildMap(m, allRoutes[MAPS.indexOf(m)], osm);
-fs.writeFileSync(path.join(OUT, 'index.json'), JSON.stringify(MAPS.map(({ id, name }) => ({ id, name }))));
+const indexFile = path.join(OUT, 'index.json');
+const index = fs.existsSync(indexFile) ? JSON.parse(fs.readFileSync(indexFile, 'utf8')) : [];
+for (const m of maps) {
+  const meta = await buildMap(m, allRoutes[MAPS.indexOf(m)], osm);
+  const k = index.findIndex((e) => e.id === m.id);
+  if (k >= 0) index[k] = meta; else index.push(meta);
+}
+// Keep the menu order the same as MAPS.
+index.sort((a, b) => MAPS.findIndex((m) => m.id === a.id) - MAPS.findIndex((m) => m.id === b.id));
+fs.writeFileSync(indexFile, JSON.stringify(index));
 log('\nDone.');

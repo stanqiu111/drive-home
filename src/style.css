@@ -262,3 +262,6 @@ kbd {
   font-weight: 800; font-size: 20px; box-shadow: 0 8px 30px rgba(0,0,0,0.35); opacity: 0; transition: opacity 0.3s, transform 0.3s;
 }
 #achieve.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* Route preview on map tiles */
+.tile.map .thumb { width: 100%; height: auto; border-radius: 8px; background: rgba(255,255,255,0.05); margin-bottom: 4px; }

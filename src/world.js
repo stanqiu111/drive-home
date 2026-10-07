@@ -297,6 +297,33 @@ function buildTerrain(t, h, waterLevel) {
   return [terrain, waterMesh];
 }
 
+// Nearest route sample to a point (grid-accelerated). Returns {i, d} or null beyond maxR.
+function routeLookup(route) {
+  const CELL = 40;
+  const grid = new Map();
+  for (let i = 0; i < route.n; i += 2) {
+    const k = cellKey(Math.floor(route.x[i] / CELL), Math.floor(route.z[i] / CELL));
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(i);
+  }
+  return (x, z, maxR) => {
+    const r = Math.ceil(maxR / CELL);
+    const cx = Math.floor(x / CELL);
+    const cz = Math.floor(z / CELL);
+    let best = null;
+    let bd = maxR * maxR;
+    for (let a = -r; a <= r; a++) {
+      for (let b = -r; b <= r; b++) {
+        for (const i of grid.get(cellKey(cx + a, cz + b)) || []) {
+          const d = (route.x[i] - x) ** 2 + (route.z[i] - z) ** 2;
+          if (d < bd) { bd = d; best = i; }
+        }
+      }
+    }
+    return best == null ? null : { i: best, d: Math.sqrt(bd) };
+  };
+}
+
 // ---------- the route road ----------
 // Spatial index of side-street centrelines, to find where they meet the route.
 function sideStreetIndex(roads) {
@@ -706,9 +733,9 @@ function buildBuildings(list, heightAt, occupancy) {
     faceQuad(mb, a, b, c, d, [along(a), slope(a) * 1.3, along(b), slope(b) * 1.3, along(c), slope(c) * 1.3, along(d), slope(d) * 1.3], col, nn);
   };
   for (const b of list) {
-    const h = b[0] / 10;
+    const h = b.h / 10;
     let ring = [];
-    for (let k = 1; k < b.length; k += 2) ring.push([b[k] / 10, b[k + 1] / 10]);
+    for (let k = 0; k < b.p.length; k += 2) ring.push([b.p[k] / 10, b.p[k + 1] / 10]);
     let base = Infinity;
     let cx = 0;
     let cz = 0;
@@ -847,6 +874,147 @@ function buildBuildings(list, heightAt, occupancy) {
     const mat = key.endsWith('t') ? towerMat : key.endsWith('r') ? roofMat : houseMat;
     group.add(new THREE.Mesh(mb.build(), mat));
   }
+  return group;
+}
+
+// ---------- store signs ----------
+// Real business names on the wall that faces the road, so players recognise where
+// they are (IKEA, the Gateway Blvd hotels, car dealerships…). All names share one
+// texture atlas and one mesh.
+const SIGN_CLASSES = new Set([4, 6, 7, 9, 12, 13]); // retail, office, civic, hotel, school, bigbox
+const SIGN_STYLES = [
+  ['#ffffff', '#c8102e'], ['#ffffff', '#1f4fb0'], ['#ffd84d', '#1c1c1e'], ['#1c1c1e', '#f4f4f0'], ['#ffffff', '#1d7a46'],
+  ['#ffffff', '#e8731c'], ['#f4f4f0', '#4a2d8a'], ['#1c1c1e', '#ffc42e'],
+];
+
+function buildSigns(list, route, heightAt) {
+  const nearest = routeLookup(route);
+  const want = [];
+  for (const b of list) {
+    if (!b.n || !SIGN_CLASSES.has(b.c)) continue;
+    const ring = [];
+    for (let k = 0; k < b.p.length; k += 2) ring.push([b.p[k] / 10, b.p[k + 1] / 10]);
+    let cx = 0;
+    let cz = 0;
+    for (const [x, z] of ring) { cx += x; cz += z; }
+    cx /= ring.length;
+    cz /= ring.length;
+    const nr = nearest(cx, cz, 340);
+    if (!nr) continue;
+    const bigLot = b.c === 13 || b.c === 9 || polyArea(ring) >= 2000;
+    if (!bigLot && nr.d > 220) continue; // small shops far behind a parking lot aren't worth a sign
+    // The wall whose outward normal points at the road, preferring long walls.
+    const rx = route.x[nr.i];
+    const rz = route.z[nr.i];
+    let best = null;
+    for (let k = 0; k < ring.length; k++) {
+      const [x1, z1] = ring[k];
+      const [x2, z2] = ring[(k + 1) % ring.length];
+      const len = Math.hypot(x2 - x1, z2 - z1);
+      if (len < 6) continue;
+      const mx = (x1 + x2) / 2;
+      const mz = (z1 + z2) / 2;
+      // Outward normal: away from the centroid.
+      let nx = -(z2 - z1) / len;
+      let nz = (x2 - x1) / len;
+      if ((mx - cx) * nx + (mz - cz) * nz < 0) { nx = -nx; nz = -nz; }
+      const toRoad = Math.hypot(rx - mx, rz - mz) || 1;
+      const facing = ((rx - mx) * nx + (rz - mz) * nz) / toRoad;
+      if (facing < 0.3) continue;
+      const score = facing * Math.min(len, 40) - toRoad * 0.05;
+      if (!best || score > best.score) best = { score, x1, z1, x2, z2, len, nx, nz, mx, mz };
+    }
+    if (!best) continue;
+    // Where a roadside pylon sign would stand: at the road edge, on the building's side.
+    const f = route.frame(nr.i * route.step);
+    const side = (cx - rx) * -f.tz + (cz - rz) * f.tx > 0 ? 1 : -1;
+    const edge = side > 0 ? f.right : f.left;
+    const pylon = route.toWorld(nr.i * route.step, edge + side * 7, 0);
+    want.push({ b, best, ring, h: b.h / 10, big: bigLot, pylon, far: nr.d, tangent: [f.tx, f.tz] });
+  }
+  if (!want.length) return new THREE.Group();
+  // Big, close places first, so they are the ones kept if the atlas fills up.
+  want.sort((a, b) => (b.big - a.big) || (a.far - b.far));
+
+  // Pack the names into an atlas (shelf packing).
+  const SIZE = 4096;
+  const ROW = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = SIZE;
+  const g = canvas.getContext('2d');
+  g.font = 'bold 46px -apple-system, Helvetica, Arial, sans-serif';
+  g.textBaseline = 'middle';
+  let px = 0;
+  let py = 0;
+  const slots = new Map();
+  for (const w of want) {
+    const name = w.b.n;
+    if (slots.has(name)) continue;
+    const tw = Math.min(SIZE, Math.ceil(g.measureText(name).width) + 28);
+    if (px + tw > SIZE) { px = 0; py += ROW; }
+    if (py + ROW > SIZE) break;
+    const [fg, bg] = SIGN_STYLES[Math.floor(hash(name.length * 3.1, name.charCodeAt(0)) * SIGN_STYLES.length)];
+    g.fillStyle = bg;
+    g.fillRect(px, py, tw, ROW);
+    g.fillStyle = fg;
+    g.fillText(name, px + 14, py + ROW / 2 + 2);
+    slots.set(name, [px / SIZE, 1 - (py + ROW) / SIZE, (px + tw) / SIZE, 1 - py / SIZE, tw / ROW]);
+    px += tw;
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+
+  const mb = new MeshBuilder();
+  const post = new MeshBuilder();
+  const V = (x, y, z) => new THREE.Vector3(x, y, z);
+  for (const { b, best, h, big, pylon, far, tangent } of want) {
+    const slot = slots.get(b.n);
+    if (!slot) continue;
+    const [u0, v0, u1, v1, aspect] = slot;
+    const base = (heightAt(best.mx, best.mz) ?? 0) - 0.5;
+    const top = base + 0.5 + h;
+    // Letters: big-box and hotel signs are tall; small shops get a fascia strip.
+    const signH = Math.min(big ? 2.4 : 1.1, h * 0.35);
+    const signW = Math.min(signH * aspect, best.len * 0.9);
+    const cy = top - signH * 0.8 - (big ? 0.6 : 0.3);
+    let ex = (best.x2 - best.x1) / best.len;
+    let ez = (best.z2 - best.z1) / best.len;
+    const off = 0.08;
+    const a = V(best.mx - ex * signW / 2 + best.nx * off, cy - signH / 2, best.mz - ez * signW / 2 + best.nz * off);
+    const c = V(best.mx + ex * signW / 2 + best.nx * off, cy + signH / 2, best.mz + ez * signW / 2 + best.nz * off);
+    const n = V(best.nx, 0, best.nz);
+    faceQuad(mb, V(a.x, a.y, a.z), V(c.x, a.y, c.z), V(c.x, c.y, c.z), V(a.x, c.y, a.z), [u0, v0, u1, v0, u1, v1, u0, v1], null, n);
+    // Big boxes and hotels also get a tall pylon sign at the road edge, like the real
+    // ones along Gateway Blvd, so the name is readable from the car.
+    if (big && best.len > 25) {
+      const px2 = pylon.x;
+      const pz2 = pylon.z;
+      const gy = pylon.y + 0.05;
+      const ph = far > 60 ? 4 : 3;
+      const pw = Math.min(11, ph * aspect);
+      const py0 = gy + (far > 60 ? 9 : 6);
+      [ex, ez] = tangent;
+      post.quad(V(px2 - 0.2, gy, pz2 - 0.2), V(px2 + 0.2, gy, pz2 - 0.2), V(px2 + 0.2, py0, pz2 - 0.2), V(px2 - 0.2, py0, pz2 - 0.2));
+      post.quad(V(px2 + 0.2, gy, pz2 + 0.2), V(px2 - 0.2, gy, pz2 + 0.2), V(px2 - 0.2, py0, pz2 + 0.2), V(px2 + 0.2, py0, pz2 + 0.2));
+      post.quad(V(px2 - 0.2, gy, pz2 + 0.2), V(px2 - 0.2, gy, pz2 - 0.2), V(px2 - 0.2, py0, pz2 - 0.2), V(px2 - 0.2, py0, pz2 + 0.2));
+      post.quad(V(px2 + 0.2, gy, pz2 - 0.2), V(px2 + 0.2, gy, pz2 + 0.2), V(px2 + 0.2, py0, pz2 + 0.2), V(px2 + 0.2, py0, pz2 - 0.2));
+      // Two-sided panel facing along the road direction (readable while driving past).
+      const dx = -ez * pw / 2;
+      const dz = ex * pw / 2;
+      for (const sgn of [1, -1]) {
+        const nn = V(ex * sgn, 0, ez * sgn);
+        faceQuad(mb, V(px2 - dx + ex * 0.03 * sgn, py0, pz2 - dz + ez * 0.03 * sgn), V(px2 + dx + ex * 0.03 * sgn, py0, pz2 + dz + ez * 0.03 * sgn),
+          V(px2 + dx + ex * 0.03 * sgn, py0 + ph, pz2 + dz + ez * 0.03 * sgn), V(px2 - dx + ex * 0.03 * sgn, py0 + ph, pz2 - dz + ez * 0.03 * sgn),
+          [u0, v0, u1, v0, u1, v1, u0, v1], null, nn);
+      }
+    }
+  }
+  const group = new THREE.Group();
+  group.add(
+    new THREE.Mesh(mb.build(), new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.5 })),
+    new THREE.Mesh(post.build(), new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.6, side: THREE.DoubleSide })),
+  );
   return group;
 }
 
@@ -1058,6 +1226,7 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
     buildMarkings(route),
     buildSideRoads(data.roads, heightAt, asphalt, route),
     buildBuildings(data.buildings, heightAt, occupancy),
+    buildSigns(data.buildings, route, heightAt),
     buildTrees(route, heightAt, occupancy, data.water),
     buildStreetLights(route),
     buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : data.name.toUpperCase()),

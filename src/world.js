@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Route, LANE_W } from './route.js';
+import { buildLandmarks } from './landmarks.js';
 
 const FOG_NEAR = 250;
 const FOG_FAR = 1800;
@@ -1076,13 +1077,26 @@ function buildSigns(list, route, heightAt) {
   // Big, close places first, so they are the ones kept if the atlas fills up.
   want.sort((a, b) => (b.big - a.big) || (a.far - b.far));
 
-  // Pack the names into an atlas (shelf packing).
-  const SIZE = 4096;
+  // Pack the names into an atlas (shelf packing), sized to what this map needs.
+  const SIZE = 2048;
   const ROW = 64;
+  const FONT = 'bold 46px -apple-system, Helvetica, Arial, sans-serif';
+  const names = [...new Set(want.map((w) => w.b.n))];
+  const measure = document.createElement('canvas').getContext('2d');
+  measure.font = FONT;
+  const widths = new Map(names.map((n) => [n, Math.min(SIZE, Math.ceil(measure.measureText(n).width) + 28)]));
+  let rows = 1;
+  let fill = 0;
+  for (const n of names) {
+    if (fill + widths.get(n) > SIZE) { rows++; fill = 0; }
+    fill += widths.get(n);
+  }
+  const HEIGHT = Math.min(SIZE, 2 ** Math.ceil(Math.log2(rows * ROW)));
   const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = SIZE;
+  canvas.width = SIZE;
+  canvas.height = HEIGHT;
   const g = canvas.getContext('2d');
-  g.font = 'bold 46px -apple-system, Helvetica, Arial, sans-serif';
+  g.font = FONT;
   g.textBaseline = 'middle';
   let px = 0;
   let py = 0;
@@ -1090,15 +1104,15 @@ function buildSigns(list, route, heightAt) {
   for (const w of want) {
     const name = w.b.n;
     if (slots.has(name)) continue;
-    const tw = Math.min(SIZE, Math.ceil(g.measureText(name).width) + 28);
+    const tw = widths.get(name);
     if (px + tw > SIZE) { px = 0; py += ROW; }
-    if (py + ROW > SIZE) break;
+    if (py + ROW > HEIGHT) break;
     const [fg, bg] = SIGN_STYLES[Math.floor(hash(name.length * 3.1, name.charCodeAt(0)) * SIGN_STYLES.length)];
     g.fillStyle = bg;
     g.fillRect(px, py, tw, ROW);
     g.fillStyle = fg;
     g.fillText(name, px + 14, py + ROW / 2 + 2);
-    slots.set(name, [px / SIZE, 1 - (py + ROW) / SIZE, (px + tw) / SIZE, 1 - py / SIZE, tw / ROW]);
+    slots.set(name, [px / SIZE, 1 - (py + ROW) / HEIGHT, (px + tw) / SIZE, 1 - py / HEIGHT, tw / ROW]);
     px += tw;
   }
   const tex = new THREE.CanvasTexture(canvas);
@@ -1469,6 +1483,7 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
     buildBuildings(data.buildings, heightAt, occupancy),
     buildSigns(data.buildings, route, heightAt),
     buildExitSigns(route, data.exits),
+    buildLandmarks(data, heightAt),
     buildTrees(route, heightAt, occupancy, data.water),
     buildStreetLights(route),
     buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : data.name.toUpperCase()),

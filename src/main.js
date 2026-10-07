@@ -801,6 +801,7 @@ if (import.meta.env.DEV) {
   window.__game = {
     S, activatePower, finish, startRace, selectMap, selectCar, progress,
     get route() { return route; },
+    get world() { return world; },
     set orbit(a) { orbitAngle = a; },
   };
 }

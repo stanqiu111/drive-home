@@ -16,3 +16,11 @@ export async function submitScore({ map, car, name, timeMs, crashes }) {
   const { error } = await supabase.from('scores').insert({ map, car, name, time_ms: Math.round(timeMs), crashes });
   if (error) throw error;
 }
+
+// Every player's best time on every map (small table), for ranks on the menu.
+export async function allBestTimes() {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('leaderboard').select('map, name, time_ms').limit(5000);
+  if (error) throw error;
+  return data;
+}

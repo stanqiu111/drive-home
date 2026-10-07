@@ -220,6 +220,26 @@ function industrialTexture() {
   });
 }
 
+// 1960s-80s concrete apartment slab: balcony grid with dark recesses. One tile = 1 floor × 2 bays.
+function slabTexture() {
+  return canvasTexture(64, 64, (g) => {
+    g.fillStyle = '#cfc8bb';
+    g.fillRect(0, 0, 64, 64);
+    for (let x = 0; x < 2; x++) {
+      g.fillStyle = '#2a3038';
+      g.fillRect(x * 32 + 4, 8, 24, 36); // recessed balcony/glass
+      g.fillStyle = '#e6e0d0';
+      g.fillRect(x * 32 + 4, 36, 24, 10); // balcony front
+      g.fillStyle = 'rgba(0,0,0,0.25)';
+      g.fillRect(x * 32 + 4, 44, 24, 2);
+    }
+    g.fillStyle = '#b8b2a4';
+    g.fillRect(0, 48, 64, 16); // floor band
+    g.fillStyle = '#8d8b86';
+    g.fillRect(60, 60, 4, 4);
+  });
+}
+
 // Parkades: open decks, a dark void between concrete slabs. One tile = 1 level × 8 m.
 function parkadeTexture() {
   return canvasTexture(64, 64, (g) => {
@@ -713,12 +733,87 @@ function buildSideRoads(roads, heightAt, asphalt, route) {
       total += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
       acc.push(total);
     }
-    const ys = pts.map(([x, z], k) => {
+    let ys = pts.map(([x, z], k) => {
       if (r.b && r.y) return r.y[0] + (r.y[1] - r.y[0]) * (acc[k] / (total || 1)) + 0.4;
       const g = heightAt(x, z);
       return g == null ? null : blend(x, z, g + 0.08);
     });
+    // An overpass: a bridge whose ground stays level is a road crossing another road.
+    // Lift its deck 6.5 m and add earth ramps beyond both ends so it doesn't float.
+    let overpass = false;
+    if (r.b && r.y && (r.l ?? 0) >= 1) {
+      let minG = Infinity;
+      for (const [x, z] of pts) { const g = heightAt(x, z); if (g != null) minG = Math.min(minG, g); }
+      if (Math.max(r.y[0], r.y[1]) - minG < 6 && total < 400) {
+        overpass = true;
+        ys = ys.map((y) => (y == null ? null : y + 6.5));
+      }
+    }
     const hw = r.w / 2;
+    if (overpass) {
+      const RAMP = 70;
+      const ramp = (from, dirX, dirZ, yTop) => {
+        // Sloped road surface and skirt from the deck end down to the ground.
+        const steps = 6;
+        let prev = { x: from[0], z: from[1], y: yTop };
+        for (let k = 1; k <= steps; k++) {
+          const d = (RAMP * k) / steps;
+          const x = from[0] + dirX * d;
+          const z = from[1] + dirZ * d;
+          const g = heightAt(x, z);
+          if (g == null) break;
+          const t = k / steps;
+          const y = yTop + (g + 0.08 - yTop) * (t * t * (3 - 2 * t));
+          const nx = -dirZ * hw;
+          const nz = dirX * hw;
+          const a = new THREE.Vector3(prev.x + nx, prev.y, prev.z + nz);
+          const b = new THREE.Vector3(prev.x - nx, prev.y, prev.z - nz);
+          const c = new THREE.Vector3(x - nx, y, z - nz);
+          const dd = new THREE.Vector3(x + nx, y, z + nz);
+          mb.quad(a, dd, c, b, [0, 0, 0, 1, 1, 1, 1, 0], null, up);
+          const ga = heightAt(prev.x, prev.z) ?? prev.y;
+          const gb = g;
+          // Embankment sides (wider than the road) down to the ground.
+          for (const sgn of [1, -1]) {
+            const top1 = new THREE.Vector3(prev.x + sgn * nx, prev.y, prev.z + sgn * nz);
+            const top2 = new THREE.Vector3(x + sgn * nx, y, z + sgn * nz);
+            const bot1 = new THREE.Vector3(prev.x + sgn * nx * 2.2, Math.min(ga, prev.y) - 0.5, prev.z + sgn * nz * 2.2);
+            const bot2 = new THREE.Vector3(x + sgn * nx * 2.2, Math.min(gb, y) - 0.5, z + sgn * nz * 2.2);
+            deck.quad(top1, bot1, bot2, top2);
+          }
+          prev = { x, z, y };
+        }
+      };
+      const [ax, az] = pts[0];
+      const [bx, bz] = pts[1];
+      const l0 = Math.hypot(bx - ax, bz - az) || 1;
+      ramp(pts[0], (ax - bx) / l0, (az - bz) / l0, ys[0]);
+      const n1 = pts.length - 1;
+      const [cx, cz] = pts[n1];
+      const [dx, dz] = pts[n1 - 1];
+      const l1 = Math.hypot(cx - dx, cz - dz) || 1;
+      ramp(pts[n1], (cx - dx) / l1, (cz - dz) / l1, ys[n1]);
+      // Piers every ~25 m.
+      for (let d = 12; d < total - 6; d += 25) {
+        let k = 0;
+        while (k < acc.length - 1 && acc[k + 1] < d) k++;
+        const t = (d - acc[k]) / ((acc[k + 1] - acc[k]) || 1);
+        const x = pts[k][0] + (pts[k + 1][0] - pts[k][0]) * t;
+        const z = pts[k][1] + (pts[k + 1][1] - pts[k][1]) * t;
+        const yd = ys[k] + (ys[k + 1] - ys[k]) * t;
+        const g = heightAt(x, z);
+        if (g == null || yd - g < 2) continue;
+        const px = (-(pts[k + 1][1] - pts[k][1])) ; const pz = (pts[k + 1][0] - pts[k][0]);
+        const pl = Math.hypot(px, pz) || 1;
+        const ux = px / pl * (hw * 0.6); const uz = pz / pl * (hw * 0.6);
+        const corners = [[x - ux - 0.6, z - uz], [x + ux - 0.6, z + uz], [x + ux + 0.6, z + uz], [x - ux + 0.6, z - uz]];
+        for (let q = 0; q < 4; q++) {
+          const p1 = corners[q];
+          const p2 = corners[(q + 1) % 4];
+          deck.quad(new THREE.Vector3(p1[0], g - 1, p1[1]), new THREE.Vector3(p2[0], g - 1, p2[1]), new THREE.Vector3(p2[0], yd - 1.4, p2[1]), new THREE.Vector3(p1[0], yd - 1.4, p1[1]));
+        }
+      }
+    }
     for (let k = 0; k < pts.length - 1; k++) {
       if (ys[k] == null || ys[k + 1] == null) continue;
       const [ax, az] = pts[k];
@@ -757,11 +852,42 @@ const APT_TINTS = [0xe3d9c6, 0xcfc8bd, 0xd9d2c2, 0xc2c9bb, 0xd8cfc9, 0xe6e0d4];
 const BIGBOX_TINTS = [0xece6da, 0xe0dcd4, 0xf1efe9, 0xd9d4c8, 0xe9e3d3];
 const INDUSTRIAL_TINTS = [0xd5d8dc, 0xc3c8ce, 0xe3e5e8, 0xb9c4cf, 0xd8d3c6];
 const BRICK_TINTS = [0xffffff, 0xe8d9cf, 0xd8c7bd, 0xf0e4dc];
+// Well-known chains get their colours (walls or accent band) so the boxes read instantly.
+const BRANDS = [
+  [/ikea/i, { wall: 0x0a58c7, band: 0xffd21a }],
+  [/canadian tire/i, { wall: 0xe8e4dc, band: 0xd9271f }],
+  [/walmart|wal-mart/i, { wall: 0xe9e9e6, band: 0x1f6fd1 }],
+  [/home depot/i, { wall: 0xe2ddd3, band: 0xf27b1b }],
+  [/best buy/i, { wall: 0xe8e8e8, band: 0x1a4fb5 }],
+  [/costco/i, { wall: 0xe6e3dc, band: 0xd43a2a }],
+  [/superstore|loblaw/i, { wall: 0xeadf3a, band: 0x1c1c1e }],
+  [/rona/i, { wall: 0xdcdcd8, band: 0x2f7a46 }],
+  [/save-on|safeway|sobeys/i, { wall: 0xe4e0d6, band: 0xc8102e }],
+  [/london drugs/i, { wall: 0xe2dfd8, band: 0x7a1f3a }],
+  [/staples/i, { wall: 0xe8e6e0, band: 0xcc0000 }],
+  [/cineplex|cinema/i, { wall: 0x2a2d33, band: 0x1f6fd1 }],
+  [/universiade|butterdome/i, { wall: 0xf2c230, band: 0xf2c230 }],
+  [/ritchie mill/i, { brick: true }],
+  [/rossdale/i, { brick: true }],
+  [/holiday inn/i, { wall: 0xe6e0d0, band: 0x2a7d3f }],
+  [/sandman/i, { wall: 0x4a4d52, band: 0xb3202a }],
+];
+function brandFor(name) {
+  if (!name) return null;
+  for (const [re, v] of BRANDS) if (re.test(name)) return v;
+  return null;
+}
 // Building classes written by tools/build-maps.mjs.
 const C = { unknown: 0, house: 1, rowhouse: 2, apartments: 3, retail: 4, industrial: 5, office: 6, civic: 7, outbuilding: 8, hotel: 9, parking: 10, church: 11, school: 12, bigbox: 13 };
 // Wall style per class: texture key, tile size in metres (u, v), tints, and whether it is
 // a glass tower. Tall buildings of any class become towers.
-function wallStyle(cls, h, area) {
+function wallStyle(cls, h, area, b) {
+  const brand = brandFor(b?.n);
+  if (brand?.brick) return { key: 'brick', uw: 6, vh: 3, tints: BRICK_TINTS };
+  // Old main-street zones (Whyte Ave, Jasper Ave): brick blocks.
+  if (b?.hz && h < 16 && cls !== C.house && cls !== C.outbuilding) return { key: 'brick', uw: 6, vh: 3, tints: BRICK_TINTS };
+  // Tall residential: 1970s concrete slabs with balcony grids, not glass towers.
+  if (h >= 30 && (cls === C.apartments || cls === C.hotel)) return { key: 'slab', uw: 7, vh: 2.9, tints: [0xc8bfae, 0xb8b2a4, 0xd6d0c4, 0xcfc8bd] };
   if (h >= 30) return { key: 'tower', uw: 14, vh: 14, tints: TOWER_TINTS };
   switch (cls) {
     case C.apartments: case C.hotel: return { key: 'apt', uw: 6, vh: 3, tints: APT_TINTS };
@@ -852,6 +978,7 @@ function buildBuildings(list, heightAt, occupancy) {
     return chunks.get(key);
   };
   const color = new THREE.Color();
+  const bandColor = new THREE.Color();
   const roofColor = new THREE.Color();
   const flat = new THREE.Color(FLAT_ROOF);
   const n = new THREE.Vector3();
@@ -886,9 +1013,10 @@ function buildBuildings(list, heightAt, occupancy) {
     cz /= ring.length;
     base -= 0.5;
     const area0 = polyArea(ring);
-    const style = wallStyle(b.c ?? 0, h, area0);
+    const style = wallStyle(b.c ?? 0, h, area0, b);
     const tower = style.key === 'tower';
-    color.setHex(style.tints[Math.floor(hash(cx, cz) * style.tints.length)]);
+    const brand = brandFor(b.n);
+    color.setHex(brand?.wall && (style.key === 'bigbox' || style.key === 'apt') ? brand.wall : style.tints[Math.floor(hash(cx, cz) * style.tints.length)]);
     // Big boxes: the accent band and plinth come from the texture; the body gets the tint.
 
     // Orient the ring so each edge's normal (-dz, dx) points outward.
@@ -925,6 +1053,12 @@ function buildBuildings(list, heightAt, occupancy) {
       const u1 = u + len / winW;
       const v1 = (top - base) / winH;
       mb.quad(V(x1, base, z1), V(x2, base, z2), V(x2, top, z2), V(x1, top, z1), [u, 0, u1, 0, u1, v1, u, v1], color, n);
+      if (parapet && brand?.band && style.key === 'bigbox') {
+        // Brand accent band along the top of the wall.
+        bandColor.setHex(brand.band);
+        const yb = top - 1.6;
+        faceQuad(mb, V(x1 + n.x * 0.05, yb, z1 + n.z * 0.05), V(x2 + n.x * 0.05, yb, z2 + n.z * 0.05), V(x2 + n.x * 0.05, yb + 1.1, z2 + n.z * 0.05), V(x1 + n.x * 0.05, yb + 1.1, z1 + n.z * 0.05), SOLID_UV, bandColor, n);
+      }
       if (parapet) {
         // Inside face of the parapet, so the roof edge has thickness from above.
         const i1x = x1 - n.x * 0.3;
@@ -1011,6 +1145,7 @@ function buildBuildings(list, heightAt, occupancy) {
     bigbox: new THREE.MeshStandardMaterial({ map: bigboxTexture(), vertexColors: true, roughness: 0.95 }),
     industrial: new THREE.MeshStandardMaterial({ map: industrialTexture(), vertexColors: true, roughness: 0.6, metalness: 0.2 }),
     parkade: new THREE.MeshStandardMaterial({ map: parkadeTexture(), vertexColors: true, roughness: 0.95 }),
+    slab: lit(slabTexture(), 0.08),
     r: new THREE.MeshStandardMaterial({ map: shingleTexture(), vertexColors: true, roughness: 0.95 }),
   };
   const group = new THREE.Group();
@@ -1107,7 +1242,14 @@ function buildSigns(list, route, heightAt) {
     const tw = widths.get(name);
     if (px + tw > SIZE) { px = 0; py += ROW; }
     if (py + ROW > HEIGHT) break;
-    const [fg, bg] = SIGN_STYLES[Math.floor(hash(name.length * 3.1, name.charCodeAt(0)) * SIGN_STYLES.length)];
+    const brand = brandFor(name);
+    let [fg, bg] = SIGN_STYLES[Math.floor(hash(name.length * 3.1, name.charCodeAt(0)) * SIGN_STYLES.length)];
+    if (brand?.band) {
+      bg = `#${brand.band.toString(16).padStart(6, '0')}`;
+      const c = new THREE.Color(brand.band);
+      fg = (c.r * 0.299 + c.g * 0.587 + c.b * 0.114) > 0.6 ? '#1c1c1e' : '#ffffff';
+      if (/ikea/i.test(name)) { bg = '#0a58c7'; fg = '#ffd21a'; }
+    }
     g.fillStyle = bg;
     g.fillRect(px, py, tw, ROW);
     g.fillStyle = fg;

@@ -6,7 +6,7 @@ import { Traffic } from './traffic.js';
 import { Signals } from './signals.js';
 import { Collectibles, makeNitroCan } from './pickups.js';
 import { POWERS, randomPower, makeMysteryBox, PowerVisuals } from './powers.js';
-import { leaderboardEnabled, topScores, submitScore } from './leaderboard.js';
+import { leaderboardEnabled, topScores, submitScore, allBestTimes } from './leaderboard.js';
 import { progress, progressReady, ACHIEVEMENTS } from './progress.js';
 import { Effects } from './effects.js';
 import { Ending } from './ending.js';
@@ -16,15 +16,46 @@ import { readInput, setupTouch, isTouch } from './input.js';
 // Game-side flavour per map. Names, distances and route facts come from maps/index.json,
 // which tools/build-maps.mjs writes.
 const MAP_INFO = {
-  home: { sub: 'Home · Gateway Blvd & Walterdale Bridge', cheer: 'FINALLY HOME!!', ending: 'game' },
-  windermere: { sub: 'West along Ellerslie Rd', cheer: 'MADE IT!!', ending: 'shopping' },
-  sherwood: { sub: 'Anthony Henday, east', cheer: 'MADE IT!!', ending: 'bbq' },
-  burger: { sub: 'Quick burger run on Ellerslie Rd', cheer: 'MADE IT!!', ending: 'burger' },
-  beachclub: { sub: 'Residents’ lake club, around the corner', cheer: 'MADE IT!!', ending: 'beach' },
-  noodle: { sub: 'Parsons Place, up 99 St', cheer: 'MADE IT!!', ending: 'noodle' },
+  home: {
+    to: 'the Legislature', cheer: 'FINALLY HOME!!', ending: 'game',
+    desc: 'The full commute: up Gateway Boulevard past South Edmonton Common, through Old Strathcona, then down into the river valley and over the white arches of the Walterdale Bridge to the Legislature. Nineteen sets of lights and a river valley: beat the real rush hour.',
+  },
+  burger: {
+    to: 'Odd Burger, Ellerslie Rd', cheer: 'MADE IT!!', ending: 'burger',
+    desc: 'Out of Summerside, left on Parsons Road, three lights and you are at Odd Burger on Ellerslie. The warm-up lap: do this one first.',
+  },
+  beachclub: {
+    to: 'the lake', cheer: 'MADE IT!!', ending: 'beach',
+    desc: 'Around the lake on Savaryn Drive and 88 Street to the residents’ beach club on Summerside Grande Boulevard. No traffic lights, just tight residential corners.',
+  },
+  noodle: {
+    to: 'Parsons Place, 34 Ave', cheer: 'MADE IT!!', ending: 'noodle',
+    desc: 'Parsons Road to Ellerslie, then Gateway Boulevard north under the Henday and past IKEA to 34 Avenue and the noodle shop at Parsons Place. Short, fast and only five lights: a lunch-hour time attack.',
+  },
+  windermere: {
+    to: 'Windermere, 170 St', cheer: 'MADE IT!!', ending: 'shopping',
+    desc: 'Straight west on Ellerslie Road, over the QE II and the Whitemud Creek ravine to the shops at Windermere. Twenty sets of lights in eleven kilometres: time them, or sit at every one.',
+  },
+  sherwood: {
+    to: 'Sherwood Park', cheer: 'MADE IT!!', ending: 'bbq',
+    desc: 'North on 91 Street, then the Anthony Henday ring road around the east side and off at Wye Road into Sherwood Park. Almost no lights for 22 km, so it is all about top speed.',
+  },
+  snowvalley: {
+    to: 'Snow Valley ski hill', cheer: 'MADE IT!!', ending: 'ski',
+    desc: 'Over the High Level Bridge, past the University and the Jubilee, down 114 Street beside the LRT, over the Whitemud on 122 Street and down Rainbow Valley Road into the ravine. Two bridges and a 50-metre drop: brake before the bottom.',
+  },
+  refinery: {
+    to: 'Sherwood Park Mall', cheer: 'MADE IT!!', ending: 'shopping',
+    desc: 'Over the James MacDonald Bridge past the Muttart pyramids, up 98 Avenue out of the valley, then Baseline Road past the refineries and tank farms and over the Henday to Sherwood Park Mall. Sixteen kilometres of city, valley and industry.',
+  },
 };
+const NEW_MAPS = new Set(['snowvalley', 'refinery']);
+const GROUPS = [
+  { from: 'Summerside', title: 'From Summerside', start: 'start: 91 St SW' },
+  { from: 'Downtown', title: 'From Downtown', start: 'start: the Legislature' },
+];
 const mapIndex = await (await fetch('maps/index.json')).json();
-const MAPS = mapIndex.map((meta) => ({ sub: '', cheer: 'MADE IT!!', ending: 'bbq', ...meta, ...MAP_INFO[meta.id] }));
+const MAPS = mapIndex.map((meta) => ({ to: '', desc: '', cheer: 'MADE IT!!', ending: 'bbq', ...meta, ...MAP_INFO[meta.id] }));
 
 const BASE_SPEED = 45; // m/s ≈ 162 km/h before car stats
 const NITRO_BONUS = 21; // m/s on top of the car's top speed
@@ -39,7 +70,7 @@ const $ = (id) => document.getElementById(id);
 const ui = {
   hud: $('hud'), time: $('time'), dist: $('dist'), fill: $('progress-fill'), carIcon: $('car-icon'),
   speed: $('speed'), speedo: $('speedo'), nitro: $('nitro-fill'), crashes: $('crashes'), street: $('street'), turn: $('turn'),
-  power: $('power'), powerLabel: $('power-label'), powerFill: $('power-fill'),
+  power: $('power'), powerLabel: $('power-label'), powerFill: $('power-fill'), landmark: $('landmark'),
   toast: $('toast'), countdown: $('countdown'), touch: $('touch'), loading: $('loading'),
   start: $('start'), mapList: $('map-list'), carList: $('car-list'), paint: $('paint'), credits: $('credits'),
   finish: $('finish'), result: $('result'),
@@ -183,6 +214,7 @@ async function selectMap(id) {
     mysteryBoxes.setRoute(route);
     ending.setRoute(route, world.heightAt, mapInfo().cheer, mapInfo().ending);
     ui.credits.textContent = data.credits;
+    S.landmarks = (data.landmarks || []).map((l) => ({ ...l, shown: false }));
     reset();
     S.mode = 'menu';
   } catch (e) {
@@ -193,65 +225,135 @@ async function selectMap(id) {
   ui.loading.classList.remove('show');
 }
 
-// A small north-up map of the route for the menu tile (cached per map).
-const thumbCache = new Map();
-function routeThumb(m) {
-  if (thumbCache.has(m.id)) return thumbCache.get(m.id);
-  const W = 160;
-  const H = 100;
-  const c = document.createElement('canvas');
-  c.width = W * 2;
-  c.height = H * 2;
-  const g = c.getContext('2d');
-  g.scale(2, 2);
+// ---------- Map select ----------
+// Difficulty: 1-5 stars from length, lights, corners and climb.
+function stars(m) {
+  const score = m.km * 0.08 + m.signals * 0.1 + m.curves * 0.12 + (m.climb > 50 ? 0.4 : 0);
+  return score <= 1 ? 1 : score <= 2.2 ? 2 : score <= 3.2 ? 3 : score <= 4.5 ? 4 : 5;
+}
+function badges(m) {
+  const out = [];
+  if (NEW_MAPS.has(m.id)) out.push('New');
+  if (m.km === Math.max(...MAPS.map((x) => x.km))) out.push('Longest');
+  if (m.highwayM / (m.km * 1000) >= 0.5) out.push('Highway');
+  if (m.bridgeM >= 100 || m.climb >= 50) out.push('Scenic');
+  if (m.km <= 2) out.push('Short');
+  if (m.signals / m.km >= 1.5) out.push('Stop & go');
+  return out.slice(0, 2);
+}
+const rushMin = (m) => Math.round((m.km * 1000) / RUSH_HOUR_SPEED / 60);
+const esc2 = (t) => String(t).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+// North-up route map as inline SVG. Big = labelled landmarks and a north arrow.
+const svgCache = new Map();
+function routeSvg(m, big) {
+  const key = `${m.id}|${big}`;
+  if (svgCache.has(key)) return svgCache.get(key);
+  const W = big ? 260 : 160;
+  const H = big ? 200 : 100;
+  const pad = big ? 22 : 10;
   const xs = m.poly.map((p) => p[0]);
   const zs = m.poly.map((p) => p[1]);
   const minX = Math.min(...xs);
   const maxX = Math.max(...xs);
   const minZ = Math.min(...zs);
   const maxZ = Math.max(...zs);
-  const pad = 12;
   const k = Math.min((W - pad * 2) / Math.max(1, maxX - minX), (H - pad * 2) / Math.max(1, maxZ - minZ));
   const offX = (W - (maxX - minX) * k) / 2;
   const offZ = (H - (maxZ - minZ) * k) / 2;
-  const X = (x) => offX + (x - minX) * k;
-  const Y = (z) => offZ + (z - minZ) * k; // z grows southwards, so north is up
-  g.lineJoin = 'round';
-  g.lineCap = 'round';
-  g.strokeStyle = 'rgba(0,0,0,0.45)';
-  g.lineWidth = 6;
-  g.beginPath();
-  m.poly.forEach(([x, z], i) => (i ? g.lineTo(X(x), Y(z)) : g.moveTo(X(x), Y(z))));
-  g.stroke();
-  g.strokeStyle = '#ffb347';
-  g.lineWidth = 3;
-  g.stroke();
-  const dot = (x, z, fill) => {
-    g.beginPath();
-    g.arc(X(x), Y(z), 4, 0, Math.PI * 2);
-    g.fillStyle = fill;
-    g.fill();
-    g.strokeStyle = '#fff';
-    g.lineWidth = 1.5;
-    g.stroke();
-  };
+  const X = (x) => (offX + (x - minX) * k).toFixed(1);
+  const Y = (z) => (offZ + (z - minZ) * k).toFixed(1); // z grows southwards, so north is up
+  const d = 'M' + m.poly.map(([x, z]) => `${X(x)} ${Y(z)}`).join('L');
   const [sx, sz] = m.poly[0];
   const [ex, ez] = m.poly[m.poly.length - 1];
-  dot(sx, sz, '#5fd4ff');
-  dot(ex, ez, '#ff5e3a');
-  const url = c.toDataURL();
-  thumbCache.set(m.id, url);
-  return url;
+  let lm = '';
+  for (const l of m.landmarks || []) {
+    lm += `<circle cx="${X(l.x)}" cy="${Y(l.z)}" r="${big ? 3.5 : 2.5}" fill="#fff" stroke="rgba(0,0,0,.5)" stroke-width="1"/>`;
+    if (big) {
+      // Labels flip to the left near the right edge so they stay inside the map.
+      const right = +X(l.x) > W * 0.62;
+      lm += `<text x="${+X(l.x) + (right ? -6 : 6)}" y="${+Y(l.z) + 4}" font-size="10" fill="#fff" stroke="rgba(0,0,0,.7)" stroke-width="2" paint-order="stroke" text-anchor="${right ? 'end' : 'start'}">${esc2(l.name)}</text>`;
+    }
+  }
+  const svg = `<svg class="rmap" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true">
+    <path d="${d}" fill="none" stroke="rgba(0,0,0,.45)" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path class="rline" d="${d}" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    ${lm}
+    <circle cx="${X(sx)}" cy="${Y(sz)}" r="4" fill="#39d353" stroke="#fff" stroke-width="1.5"/>
+    <circle cx="${X(ex)}" cy="${Y(ez)}" r="4.5" fill="#ff5e3a" stroke="#fff" stroke-width="1.5"/>
+    ${big ? `<text x="${W - 14}" y="16" font-size="12" font-weight="700" fill="rgba(255,255,255,.7)">N</text><path d="M${W - 10} 20 l0 10" stroke="rgba(255,255,255,.7)" stroke-width="1.5"/>` : ''}
+  </svg>`;
+  svgCache.set(key, svg);
+  return svg;
+}
+
+// Online best times for every map (fetched once per menu visit when the database is on).
+let ranks = null;
+async function loadRanks() {
+  if (!leaderboardEnabled) return;
+  try {
+    const rows = await allBestTimes();
+    ranks = {};
+    for (const r of rows) (ranks[r.map] ??= []).push(r);
+    for (const list of Object.values(ranks)) list.sort((a, b) => a.time_ms - b.time_ms);
+    if (S.mode === 'menu') renderMenu();
+  } catch { /* offline */ }
+}
+
+function mapCard(m) {
+  const best = loadBest(m.id);
+  const sel = m.id === prefs.map;
+  const st = stars(m);
+  let ledger;
+  if (best) {
+    const list = ranks?.[m.id];
+    const rank = list ? 1 + list.filter((r) => r.time_ms < best * 1000).length : null;
+    ledger = `Best ${fmt(best)}${rank ? ` · #${rank} online` : ''}`;
+  } else ledger = `Rush hour ≈ ${rushMin(m)} min · beat it`;
+  return `<button class="tile route ${sel ? 'sel' : ''}" data-map="${m.id}" aria-pressed="${sel}">
+    <div class="rmap-wrap">${routeSvg(m, false)}<div class="badges">${badges(m).map((b) => `<span class="badge ${b === 'New' ? 'new' : ''}">${b}</span>`).join('')}</div></div>
+    <b>${esc2(m.name)}</b>
+    <span class="fromto">${esc2(m.from)} → ${esc2(m.to || m.name)}</span>
+    <span class="rstats">${m.km} km · <i class="stars" title="${st} of 5">${'★'.repeat(st)}${'☆'.repeat(5 - st)}</i> · ${m.signals} lights</span>
+    <small>${ledger}</small></button>`;
+}
+
+function mapDetail(m) {
+  const best = loadBest(m.id);
+  const rush = rushMin(m) * 60;
+  const list = ranks?.[m.id] || null;
+  const top = list?.[0] || null;
+  const rank = best && list ? 1 + list.filter((r) => r.time_ms < best * 1000).length : null;
+  const pct = (sec) => `${clamp((sec / rush) * 100, 2, 100).toFixed(1)}%`;
+  const chips = [`${m.km} km`, `${'★'.repeat(stars(m))} difficulty`, `${m.signals} lights`, m.bridgeM >= 60 ? `${Math.round(m.bridgeM)} m of bridges` : null, m.climb >= 20 ? `${m.climb} m of climbing` : null, m.highwayM >= 1000 ? `${(m.highwayM / 1000).toFixed(1)} km of freeway` : null].filter(Boolean);
+  return `<div class="detail-inner">
+    ${routeSvg(m, true)}
+    <h3>${esc2(m.name)}</h3>
+    <p class="fromto">${esc2(m.from)} → ${esc2(m.to || m.name)}</p>
+    <p class="desc">${esc2(m.desc)}</p>
+    <div class="chips">${chips.map((c) => `<span>${c}</span>`).join('')}</div>
+    <div class="race">
+      <div class="track"></div>
+      <div class="mark rush" style="left:100%"><i></i><span>Rush hour ${rushMin(m)}:00</span></div>
+      ${top ? `<div class="mark top" style="left:${pct(top.time_ms / 1000)}"><i></i><span>Top ${fmt(top.time_ms / 1000)} by ${esc2(top.name)}</span></div>` : ''}
+      ${best ? `<div class="mark you" style="left:${pct(best)}"><i></i><span>You ${fmt(best)}${rank ? ` · #${rank} of ${list.length}` : ''}</span></div>` : ''}
+    </div>
+    ${!best ? `<p class="hint">Not driven yet. Real traffic takes about ${rushMin(m)} minutes.</p>` : ''}
+    ${m.landmarks?.length ? `<p class="hint">Passes: ${m.landmarks.map((l) => esc2(l.name)).join(' · ')}</p>` : ''}
+  </div>`;
 }
 
 function renderMenu() {
-  ui.mapList.innerHTML = MAPS.map((m) => {
-    const best = loadBest(m.id);
-    return `<button class="tile map ${m.id === prefs.map ? 'sel' : ''}" data-map="${m.id}">
-      <img class="thumb" src="${routeThumb(m)}" alt="" width="160" height="100" />
-      <b>${m.name}</b><span>${m.sub}</span>
-      <small>${m.km} km${best ? ` · best ${fmt(best)}` : ''}</small></button>`;
+  const currentMap = MAPS.find((m) => m.id === prefs.map) || MAPS[0];
+  ui.mapList.innerHTML = GROUPS.map((g) => {
+    const list = MAPS.filter((m) => (m.from || 'Summerside') === g.from);
+    if (!list.length) return '';
+    // The commute first, then the rest by distance.
+    list.sort((a, b) => (a.id === 'home' ? -1 : b.id === 'home' ? 1 : a.km - b.km));
+    return `<h2 class="group">${g.title} <span>${g.start}</span></h2>
+      <div class="tiles routes">${list.map((m) => mapCard(m) + (m.id === currentMap.id ? `<div class="detail inline">${mapDetail(m)}</div>` : '')).join('')}</div>`;
   }).join('');
+  $('route-detail').innerHTML = mapDetail(currentMap);
   const bar = (label, v) => `<div class="stat"><i>${label}</i><div><em style="width:${clamp((v - 0.75) / 0.55, 0.08, 1) * 100}%"></em></div></div>`;
   ui.carList.innerHTML = CAR_IDS.map((id) => {
     const c = CAR_MODELS[id];
@@ -343,6 +445,7 @@ ui.carList.addEventListener('click', (e) => {
 
 // --- Race flow ---
 function reset() {
+  for (const l of S.landmarks || []) l.shown = false;
   Object.assign(S, {
     s: 8, y: 0, speed: 0, steer: 0, nitro: 1, boosting: false, drifting: false, driftYaw: 0,
     power: null, powerTime: 0, time: 0, crashes: 0, smashed: 0, reds: 0, invuln: 0, shake: 0, airborne: false,
@@ -358,6 +461,7 @@ function reset() {
 
 function showMenu() {
   ui.finish.classList.remove('show');
+  loadRanks();
   if (S.mode === 'finished') {
     reset();
     S.mode = 'menu';
@@ -692,6 +796,7 @@ function updateMenuCamera(t) {
   snapCamera = true;
 }
 
+let landmarkTimer = 0;
 function updateHud(dt) {
   const show = S.mode === 'countdown' || S.mode === 'race';
   ui.hud.classList.toggle('hidden', !show);
@@ -714,6 +819,15 @@ function updateHud(dt) {
   ui.nitro.style.width = `${S.nitro * 100}%`;
   ui.crashes.textContent = S.crashes ? `💥 ${S.crashes}` : '';
   ui.street.textContent = route.nameAt(S.s) || ' ';
+  // Landmark callouts: announce a real landmark as it comes up beside the road.
+  for (const l of S.landmarks || []) {
+    if (l.shown || S.s < l.s - 160 || S.s > l.s + 40) continue;
+    l.shown = true;
+    ui.landmark.textContent = `${l.side < 0 ? '◀ ' : ''}📍 ${l.name}${l.side > 0 ? ' ▶' : ''}`;
+    ui.landmark.classList.add('show');
+    clearTimeout(landmarkTimer);
+    landmarkTimer = setTimeout(() => ui.landmark.classList.remove('show'), 3200);
+  }
 
   const corner = route.cornerAhead(S.s + 10, 160);
   const safe = corner.v * stats.grip * 1.15;
@@ -808,5 +922,5 @@ if (import.meta.env.DEV) {
 
 selectCar(prefs.car);
 selectMap(prefs.map);
-progressReady.then(() => { if (S.mode === 'menu') renderMenu(); });
+progressReady.then(() => { if (S.mode === 'menu') renderMenu(); loadRanks(); });
 requestAnimationFrame(frame);

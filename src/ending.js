@@ -294,6 +294,40 @@ const THEMES = {
       return 1.6 + Math.sin(t * 6) * 0.9;
     },
   },
+  ski: {
+    text: 'HILL TIME ⛷️',
+    build(e) {
+      // Snow Valley in autumn: a lift tower with chairs and a tubing lane marker.
+      const prop = new THREE.Group();
+      const steel = mat(0x9a9ea3);
+      prop.add(cyl(0.25, 0.3, 9, steel, 0, 4.5, 0), box(3.2, 0.25, 0.25, steel, 0, 9, 0));
+      for (const x of [-1.4, 1.4]) {
+        const cable = cyl(0.03, 0.03, 14, mat(0x333333), x, 9.3, 0, 6);
+        cable.rotation.x = Math.PI / 2;
+        prop.add(cable);
+      }
+      const chairMat = mat(0xd9442b);
+      for (let k = 0; k < 4; k++) {
+        const z = -6 + k * 4;
+        const x = k % 2 ? 1.4 : -1.4;
+        const hang = box(0.06, 1.6, 0.06, steel, x, 8.5, z);
+        const seat = box(1.4, 0.12, 0.5, chairMat, x, 7.6, z);
+        const back = box(1.4, 0.6, 0.1, chairMat, x, 7.9, z + 0.25);
+        prop.add(hang, seat, back);
+      }
+      prop.add(box(2.4, 1.0, 0.1, mat(0x1f5f3a), 2.6, 1.6, 1.2), cyl(0.05, 0.05, 1.1, steel, 2.6, 0.55, 1.2));
+      e.chairs = prop;
+      const sled = new THREE.Group();
+      sled.add(new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.16, 8, 18).rotateX(Math.PI / 2), mat(0x2f7de1)));
+      sled.position.y = -0.3;
+      return { seat: benchSeat(0x4e3f35), prop, hand: sled, propZ: -2.2 };
+    },
+    // Showing off the tube, chairs swaying gently.
+    animate(e, t) {
+      e.chairs.children.forEach((c, i) => { if (i > 4) c.rotation.z = Math.sin(t * 1.5 + i) * 0.05; });
+      return 1.2 + Math.sin(t * 3) * 0.6;
+    },
+  },
   bbq: {
     text: 'BBQ TIME 🌭',
     build(e) {

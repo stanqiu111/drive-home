@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { fromUrl } from 'geotiff';
 import proj4 from 'proj4';
 import { createOSMStream } from 'osm-pbf-parser-node';
+import { LANDMARK_LIST } from '../src/landmark-list.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = path.join(ROOT, 'tools/cache');
@@ -34,6 +35,10 @@ const MAPS = [
   { id: 'burger', name: 'Odd Burger', dest: [-113.478038, 53.4260143] },
   { id: 'beachclub', name: 'Summerside Beach Club', dest: [-113.4688974, 53.4172588] },
   { id: 'noodle', name: 'Noodle Feast', dest: [-113.4877410, 53.4685914] },
+  // From downtown: 107 St NW just north of 97 Ave, a public street on the east edge of the
+  // Legislature grounds (the exact end of the home route is a grounds loop road OSRM dislikes).
+  { id: 'snowvalley', name: 'Snow Valley', from: 'Downtown', start: [-113.504, 53.535], dest: [-113.5574, 53.4849] },
+  { id: 'refinery', name: 'Refinery Row', from: 'Downtown', start: [-113.504, 53.535], dest: [-113.2935455, 53.5309686] },
 ];
 
 const STEP = 2; // metres between route samples
@@ -207,6 +212,31 @@ function segDist(px, pz, ax, az, bx, bz) {
 }
 
 // Douglas–Peucker on a closed ring of [x,z].
+// Index polygons on a grid; returns (x, z) → polygons containing the point.
+function polyGridFor(list, cell) {
+  const grid = new Map();
+  list.forEach((item, idx) => {
+    const xs = item.ring.map((p) => p[0]);
+    const zs = item.ring.map((p) => p[1]);
+    item.box = [arrMin(xs), arrMin(zs), arrMax(xs), arrMax(zs)];
+    for (let i = Math.floor(item.box[0] / cell); i <= Math.floor(item.box[2] / cell); i++) {
+      for (let j = Math.floor(item.box[1] / cell); j <= Math.floor(item.box[3] / cell); j++) {
+        const k = `${i},${j}`;
+        if (!grid.has(k)) grid.set(k, []);
+        grid.get(k).push(idx);
+      }
+    }
+  });
+  return (x, z) => {
+    const out = [];
+    for (const idx of grid.get(`${Math.floor(x / cell)},${Math.floor(z / cell)}`) ?? []) {
+      const it = list[idx];
+      if (x >= it.box[0] && x <= it.box[2] && z >= it.box[1] && z <= it.box[3] && pointInRing(x, z, it.ring)) out.push(it);
+    }
+    return out;
+  };
+}
+
 function pointInRing(x, z, ring) {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -444,6 +474,50 @@ async function loadRooflines(m, pts) {
   });
 }
 
+// ---------- 3b. City of Edmonton zoning (Bylaw 20001 polygons) ----------
+// Zone codes decide a style class where OpenStreetMap doesn't say what a footprint is.
+async function loadZoning(m, pts) {
+  return cached(`zoning-${m.id}.json`, async () => {
+    log('  downloading City of Edmonton zoning…');
+    const xs = pts.map((p) => p[0]);
+    const zs = pts.map((p) => p[1]);
+    const [w, s] = unproject(arrMin(xs) - BUILDING_RADIUS - 100, arrMax(zs) + BUILDING_RADIUS + 100);
+    const [e, n] = unproject(arrMax(xs) + BUILDING_RADIUS + 100, arrMin(zs) - BUILDING_RADIUS - 100);
+    const poly = `POLYGON((${w} ${s},${e} ${s},${e} ${n},${w} ${n},${w} ${s}))`;
+    const out = [];
+    for (let offset = 0; ; offset += 20000) {
+      const u = `https://data.edmonton.ca/resource/fixa-tstc.json?$select=zoning,geometry_multipolygon&$where=${encodeURIComponent(`intersects(geometry_multipolygon,'${poly}')`)}&$limit=20000&$offset=${offset}&$order=:id`;
+      const rows = await getJSON(u);
+      for (const row of rows) {
+        const g = row.geometry_multipolygon;
+        if (!g || !row.zoning) continue;
+        for (const polyg of g.type === 'MultiPolygon' ? g.coordinates : [g.coordinates]) out.push({ z: row.zoning, ring: polyg[0] });
+      }
+      if (rows.length < 20000) break;
+    }
+    log(`  ${out.length} zoning polygons`);
+    return out;
+  });
+}
+// Zone code → class (or null for "no information"). Height/area refine it.
+function zoneClass(code, area, h) {
+  const z = code.split(' ')[0];
+  if (/^(RS|RSF|RR|GLDF|GLD|PLD|SLD|CCSD|RAES|RCES)$/.test(z)) return area < 80 && h < 5 ? 'outbuilding' : area > 450 && h > 9 ? 'apartments' : 'house';
+  if (/^(GRH|BRH|SRH|PRH|RVRH|SRA)$/.test(z)) return area < 80 && h < 5 ? 'outbuilding' : 'rowhouse';
+  if (/^RSM/.test(z)) return area < 250 ? 'rowhouse' : 'apartments';
+  if (/^(RM|GLRA|GMRA|ALA|BLMR|BMR|HDR|CCMD|CCHD|RCRM|RTCMR|RTCR|RL|RCRL)/.test(z)) return h < 9 && area < 300 ? 'rowhouse' : 'apartments';
+  if (/^(MU|CCA|JAMSC|CMU|CPMU|RMU|MMUT|TC-MU|MUN|CMUV|HA|AED)/.test(z)) return h >= 30 ? 'office' : area >= 2500 && h < 14 ? 'bigbox' : 'retail';
+  if (/^CN$/.test(z)) return 'retail';
+  if (/^(CG|MRC|ASC|AUVC|ECB|CCNC|TC-C|UC3ES)$/.test(z)) return area >= 2500 ? 'bigbox' : 'retail';
+  if (/^CB$/.test(z)) return h >= 25 ? 'office' : 'retail';
+  if (/^(BE|EIB|IBES|UW)$/.test(z)) return area < 300 ? 'retail' : 'industrial';
+  if (/^(IM|IH|EIM|EET|ILES|INDES|PU)/.test(z)) return 'industrial';
+  if (/^(PS|PSN|UF|UI|AJ)$/.test(z)) return area >= 1500 && h < 16 ? 'school' : 'civic';
+  if (/^(A|NA|AG|FD|AES|A[1-7])$/.test(z)) return area < 150 ? 'outbuilding' : 'industrial';
+  return null;
+}
+const HERITAGE_ZONES = /^(HA|JAMSC)\b/;
+
 // ---------- 4. terrain ----------
 proj4.defs('EPSG:3979', '+proj=lcc +lat_0=49 +lon_0=-95 +lat_1=49 +lat_2=77 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
 let demImage;
@@ -654,7 +728,8 @@ async function buildMap(m, ptsGlobal, osm) {
   // Route elevation: smoothed DEM, straight lines across bridges.
   const routeLL = pts.map(([x, z]) => U(x, z));
   const elev0 = (await sampleDEM([start]))[0];
-  let ry = (await sampleDEM(routeLL)).map((e) => e - elev0);
+  const routeDem = await sampleDEM(routeLL);
+  let ry = routeDem.map((e) => e - elev0);
   ry = smoothArr(ry, 15);
   for (let i = 0; i < N; i++) {
     if (!bridgeClean[i]) continue;
@@ -666,6 +741,28 @@ async function buildMap(m, ptsGlobal, osm) {
     i = j;
   }
   ry = smoothArr(ry, 6);
+  // Overpasses: a bridge run whose ground stays near road level is a road crossing another
+  // road (the DEM is bare earth, so it shows no structure). Lift it ~6.5 m with ramps.
+  const humps = [];
+  for (let i = 0; i < N; i++) {
+    if (!bridgeClean[i]) continue;
+    let j = i;
+    while (j < N && bridgeClean[j]) j++;
+    const endH = Math.max(ry[Math.max(0, i - 1)], ry[Math.min(N - 1, j)]);
+    let minGround = Infinity;
+    for (let k = i; k < j; k++) minGround = Math.min(minGround, routeDem[k] - elev0);
+    if (endH - minGround < 6 && (j - i) * STEP < 400) humps.push([i, j]);
+    i = j;
+  }
+  const RAMP = 90 / STEP;
+  for (const [a, b] of humps) {
+    for (let k = Math.max(0, a - RAMP); k < Math.min(N, b + RAMP); k++) {
+      const t = k < a ? (k - (a - RAMP)) / RAMP : k >= b ? 1 - (k - b) / RAMP : 1;
+      const w = t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
+      ry[k] += 6.5 * w;
+    }
+  }
+  if (humps.length) log(`  ${humps.length} overpass humps`);
 
   // Distance from each grid vertex to the route (chamfer), then flatten the ground under the road.
   const dist = new Float32Array(nx * nz).fill(1e9);
@@ -768,6 +865,22 @@ async function buildMap(m, ptsGlobal, osm) {
 
   // Buildings.
   const city = await loadRooflines(m, ptsGlobal);
+  const zoning = await loadZoning(m, ptsGlobal);
+  const zonePolys = zoning.map((zp) => ({ t: zp.z, ring: zp.ring.map(([lon, lat]) => P(lon, lat)) }));
+  const zoneHits = polyGridFor(zonePolys, 150);
+  const zoneAt = (x, z) => {
+    let best = null;
+    for (const zp of zoneHits(x, z)) {
+      const size = (zp.box[2] - zp.box[0]) * (zp.box[3] - zp.box[1]);
+      if (!best || size < best.size) best = { z: zp.t, size };
+    }
+    return best?.z ?? null;
+  };
+  let skylineTowers = [];
+  try {
+    const sd = await import('../src/landmarks/skyline-data.js');
+    skylineTowers = (sd.SKYLINE_TOWERS || []).map((T) => ({ ...T, xy: P(T.lon, T.lat) }));
+  } catch { /* no skyline data yet */ }
   const cityCells = new Set();
   const endI = N - 1;
   const endRight = right[endI];
@@ -796,29 +909,7 @@ async function buildMap(m, ptsGlobal, osm) {
     if (w.t.building) osmBuildings.push({ t: w.t, ring });
     else areas.push({ t: w.t, ring });
   }
-  const polyGrid = (list, cell) => {
-    const grid = new Map();
-    list.forEach((item, idx) => {
-      const xs = item.ring.map((p) => p[0]);
-      const zs = item.ring.map((p) => p[1]);
-      item.box = [arrMin(xs), arrMin(zs), arrMax(xs), arrMax(zs)];
-      for (let i = Math.floor(item.box[0] / cell); i <= Math.floor(item.box[2] / cell); i++) {
-        for (let j = Math.floor(item.box[1] / cell); j <= Math.floor(item.box[3] / cell); j++) {
-          const k = `${i},${j}`;
-          if (!grid.has(k)) grid.set(k, []);
-          grid.get(k).push(idx);
-        }
-      }
-    });
-    return (x, z) => {
-      const out = [];
-      for (const idx of grid.get(`${Math.floor(x / cell)},${Math.floor(z / cell)}`) ?? []) {
-        const it = list[idx];
-        if (x >= it.box[0] && x <= it.box[2] && z >= it.box[1] && z <= it.box[3] && pointInRing(x, z, it.ring)) out.push(it);
-      }
-      return out;
-    };
-  };
+  const polyGrid = polyGridFor;
   const osmAt = polyGrid(osmBuildings, 50);
   const areaAt = polyGrid(areas, 200);
   const landuseAt = (x, z) => {
@@ -832,6 +923,21 @@ async function buildMap(m, ptsGlobal, osm) {
     return best?.lu ?? null;
   };
 
+  // Landmarks on this map: generic footprints under hand-made models are dropped, and the
+  // ones the route passes get a callout (name + where along the route).
+  const landmarkXY = LANDMARK_LIST.map((L) => ({ ...L, xy: P(L.lon, L.lat) }));
+  const excluded = (x, z) => landmarkXY.some((L) => L.excludeR > 0 && Math.hypot(L.xy[0] - x, L.xy[1] - z) < L.excludeR)
+    || skylineTowers.some((T) => Math.hypot(T.xy[0] - x, T.xy[1] - z) < (T.excludeR || 0));
+  const mapLandmarks = [];
+  for (const L of landmarkXY) {
+    if (!L.callout) continue;
+    const nr = index.nearest(L.xy[0], L.xy[1], L.seeFrom);
+    if (!nr) continue;
+    mapLandmarks.push({ name: L.callout, s: nr.i * STEP, side: lateral(nr.i, L.xy[0], L.xy[1]) >= 0 ? 1 : -1, x: Math.round(L.xy[0]), z: Math.round(L.xy[1]) });
+  }
+  mapLandmarks.sort((a, b) => a.s - b.s);
+  log(`  landmarks on route: ${mapLandmarks.map((l) => l.name).join(', ') || 'none'}`);
+
   const buildings = [];
   const classCount = {};
   const addBuilding = (ring, h, tall, tags) => {
@@ -843,6 +949,7 @@ async function buildMap(m, ptsGlobal, osm) {
     const nr = index.nearest(cx, cz, BUILDING_RADIUS);
     if (!nr && !(tall && index.nearest(cx, cz, SKYLINE_RADIUS))) return;
     if (!keepBuilding(ring)) return;
+    if (excluded(cx, cz)) return;
     // What OpenStreetMap knows about this footprint (city footprints: whichever OSM building contains its centre).
     let t = tags;
     if (!t) {
@@ -851,6 +958,8 @@ async function buildMap(m, ptsGlobal, osm) {
     }
     const area = ringArea(ring);
     let cls = osmClass(t);
+    const zone = zoneAt(cx, cz);
+    if (!cls && zone) cls = zoneClass(zone, area, h);
     if (!cls) {
       const lu = landuseAt(cx, cz);
       if (lu === 'industrial') cls = h < 30 ? 'industrial' : 'office';
@@ -864,6 +973,7 @@ async function buildMap(m, ptsGlobal, osm) {
     if (name && area > 150) b.n = name;
     if (t?.['building:levels'] > 0) b.l = parseInt(t['building:levels'], 10);
     if (t?.['roof:shape']) b.r = t['roof:shape'];
+    if (zone && HERITAGE_ZONES.test(zone)) b.hz = 1;
     buildings.push(b);
     return [cx, cz];
   };
@@ -942,6 +1052,7 @@ async function buildMap(m, ptsGlobal, osm) {
     buildings,
     signals,
     exits,
+    landmarks: mapLandmarks,
     credits: 'Map data © OpenStreetMap contributors (ODbL) · Contains information licensed under the Open Government Licence – City of Edmonton · Elevation: Natural Resources Canada (OGL-Canada)',
   };
   const file = path.join(OUT, `${m.id}.json`);
@@ -967,8 +1078,10 @@ async function buildMap(m, ptsGlobal, osm) {
     id: m.id,
     name: m.name,
     from: m.from ?? 'Summerside',
+    origin: start,
     km: Math.round((N * STEP) / 100) / 10,
     poly,
+    landmarks: mapLandmarks.map((l) => ({ name: l.name, s: l.s, x: l.x, z: l.z })),
     streets: nameRuns.map((r) => r[1]).filter((v, i, a) => v && a.indexOf(v) === i),
     signals: signals.length,
     curves,

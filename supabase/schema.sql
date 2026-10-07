@@ -41,7 +41,7 @@ create policy "update own progress" on public.player_progress for update to auth
 -- ---------- scores ----------
 create table if not exists public.scores (
   id bigint generated always as identity primary key,
-  map text not null check (map in ('home', 'windermere', 'sherwood', 'burger', 'beachclub', 'noodle')),
+  map text not null check (map in ('home', 'windermere', 'sherwood', 'burger', 'beachclub', 'noodle', 'snowvalley', 'refinery')),
   car text not null check (char_length(car) <= 20),
   name text not null check (char_length(btrim(name)) between 1 and 16),
   time_ms integer not null check (time_ms between 5000 and 3600000),
@@ -49,6 +49,10 @@ create table if not exists public.scores (
   created_at timestamptz not null default now()
 );
 alter table public.scores add column if not exists user_id uuid references auth.users (id) on delete cascade;
+-- Keep the allowed map list current on an existing table.
+alter table public.scores drop constraint if exists scores_map_check;
+alter table public.scores add constraint scores_map_check
+  check (map in ('home', 'windermere', 'sherwood', 'burger', 'beachclub', 'noodle', 'snowvalley', 'refinery'));
 create index if not exists scores_map_time on public.scores (map, time_ms);
 
 -- Scores always carry the poster's account and its fixed name, whatever the client sends.

@@ -1,0 +1,51 @@
+<!doctype html><html><body style="margin:0;background:#222">
+<!-- Dev harness: renders one landmark model from src/landmarks/<id>.js from four angles.
+     Open /landmark-studio.html?id=legislature&dist=180 (dist = camera distance in metres). -->
+<canvas id="c"></canvas>
+<script type="module">
+import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { LANDMARK_LIST } from '/src/landmark-list.js';
+import { landmarkContext, setLandmarkEnvMap } from '/src/landmarks.js';
+const q = new URLSearchParams(location.search);
+const id = q.get('id');
+const W = 1600, H = 1000;
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.setScissorTest(true);
+setLandmarkEnvMap(new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xb8c4cc);
+scene.fog = new THREE.Fog(0xe0866a, 250, 1800);
+scene.add(new THREE.HemisphereLight(0xffe2c4, 0x3a3a4a, 1.6));
+const sun = new THREE.DirectionalLight(0xffc28f, 2.0);
+sun.position.set(-300, 250, -600);
+scene.add(sun);
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x86a04c, roughness: 1 })));
+// A 10 m grid marker so sizes can be judged.
+scene.add(new THREE.GridHelper(400, 40, 0x444444, 0x666666));
+const entry = LANDMARK_LIST.find((e) => e.id === id) ?? { id, lon: 0, lat: 0, yaw: 0 };
+const mod = await import(`/src/landmarks/${id}.js`);
+const model = mod.build(landmarkContext(entry));
+model.position.y = mod.sink ?? 0;
+scene.add(model);
+const box = new THREE.Box3().setFromObject(model);
+const size = box.getSize(new THREE.Vector3());
+const center = box.getCenter(new THREE.Vector3());
+const dist = Number(q.get('dist')) || Math.max(size.x, size.y, size.z) * 1.6;
+const cam = new THREE.PerspectiveCamera(40, (W / 2) / (H / 2), 1, 20000);
+const VIEWS = [[-35, 18], [55, 12], [215, 25], [145, 50]]; // [azimuth deg from north, elevation deg]
+VIEWS.forEach(([az, el], i) => {
+  const x = (i % 2) * (W / 2), y = (1 - Math.floor(i / 2)) * (H / 2);
+  renderer.setViewport(x, y, W / 2, H / 2);
+  renderer.setScissor(x, y, W / 2, H / 2);
+  const a = az * Math.PI / 180, e = el * Math.PI / 180;
+  cam.position.set(center.x + Math.sin(a) * Math.cos(e) * dist, center.y + Math.sin(e) * dist, center.z - Math.cos(a) * Math.cos(e) * dist);
+  cam.lookAt(center);
+  renderer.render(scene, cam);
+});
+window.info = { size: size.toArray().map((v) => +v.toFixed(1)), min: box.min.toArray().map((v) => +v.toFixed(1)), max: box.max.toArray().map((v) => +v.toFixed(1)), triangles: (() => { let t = 0; model.traverse((o) => { if (o.isMesh) { const g = o.geometry; t += (g.index ? g.index.count : g.attributes.position.count) / 3; } }); return Math.round(t); })() };
+window.ready = true;
+</script></body></html>

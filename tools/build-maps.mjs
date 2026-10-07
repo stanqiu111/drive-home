@@ -52,7 +52,8 @@ const HIGHWAYS = new Set([
 ]);
 const WAY_KEYS = ['highway', 'lanes', 'lanes:forward', 'lanes:backward', 'oneway', 'junction', 'bridge', 'layer',
   'name', 'ref', 'building', 'height', 'building:levels', 'building:colour', 'roof:shape', 'amenity', 'shop', 'tourism',
-  'leisure', 'office', 'brand', 'landuse', 'natural', 'water', 'parking', 'man_made', 'operator'];
+  'leisure', 'office', 'brand', 'landuse', 'natural', 'water', 'parking', 'man_made', 'operator',
+  'destination', 'destination:ref', 'destination:street', 'junction:ref', 'exit_to'];
 
 // Building classes written to the map files (the renderer picks a style per class).
 const CLASS = {
@@ -880,6 +881,31 @@ async function buildMap(m, ptsGlobal, osm) {
   }
   log(`  ${buildings.length} buildings (${osmCount} from OpenStreetMap): ${JSON.stringify(classCount)}`);
 
+  // Exit signs: ramps (link roads) that leave the route carry OSM `destination` tags,
+  // which is what the real green overhead signs say.
+  const exits = [];
+  for (const r of roads) {
+    if (!/_link$/.test(r.t.highway)) continue;
+    const text = r.t.destination || r.t['destination:street'] || r.t.exit_to;
+    if (!text) continue;
+    const [x, z] = r.p[0];
+    const nr = index.nearest(x, z, 30);
+    if (!nr) continue;
+    const lat = lateral(nr.i, x, z);
+    if (Math.abs(lat) > Math.max(right[nr.i], -left[nr.i]) + 12) continue;
+    // The ramp must head roughly the same way as the route (it leaves, not joins).
+    const [x2, z2] = r.p[Math.min(1, r.p.length - 1)];
+    const dot = (x2 - x) * tx[nr.i] + (z2 - z) * tz[nr.i];
+    if (dot < 0) continue;
+    const s0 = nr.i * STEP;
+    if (s0 < 300 || s0 > (N - 100) * STEP) continue;
+    // One sign per destination per interchange (ramps often split into several OSM ways).
+    if (exits.some((e) => Math.abs(e.s - s0) < 700 && e.text.join(';') === text)) continue;
+    exits.push({ s: s0, side: lat >= 0 ? 1 : -1, text: text.split(';').map((v) => v.trim()).filter(Boolean).slice(0, 3), ref: r.t['destination:ref'] || r.t['junction:ref'] || '' });
+  }
+  exits.sort((a, b) => a.s - b.s);
+  log(`  ${exits.length} exit signs`);
+
   // Traffic signals on the route.
   const signals = [];
   for (const [lon, lat] of osm.signals) {
@@ -915,6 +941,7 @@ async function buildMap(m, ptsGlobal, osm) {
     roads: otherRoads,
     buildings,
     signals,
+    exits,
     credits: 'Map data © OpenStreetMap contributors (ODbL) · Contains information licensed under the Open Government Licence – City of Edmonton · Elevation: Natural Resources Canada (OGL-Canada)',
   };
   const file = path.join(OUT, `${m.id}.json`);

@@ -123,6 +123,115 @@ function houseTexture() {
   });
 }
 
+// Mid-rise apartments / hotels: stucco with punched windows and a balcony slab per floor.
+// One tile = 1 floor (3 m) × 2 bays (6 m).
+function aptTexture() {
+  return canvasTexture(64, 64, (g) => {
+    g.fillStyle = '#d6cfc2';
+    g.fillRect(0, 0, 64, 64);
+    for (let i = 0; i < 300; i++) {
+      g.fillStyle = `rgba(0,0,0,${Math.random() * 0.08})`;
+      g.fillRect(Math.random() * 64, Math.random() * 64, 2, 2);
+    }
+    for (let x = 0; x < 2; x++) {
+      const lit = Math.random() < 0.3;
+      g.fillStyle = '#f6f4ee';
+      g.fillRect(x * 32 + 6, 12, 20, 30);
+      g.fillStyle = lit ? '#ffcf73' : '#2b323c';
+      g.fillRect(x * 32 + 8, 14, 16, 26);
+    }
+    // Balcony slab and railing at the bottom of the floor.
+    g.fillStyle = '#9a948a';
+    g.fillRect(0, 44, 64, 5);
+    g.fillStyle = 'rgba(40,40,45,0.5)';
+    for (let x = 2; x < 64; x += 6) g.fillRect(x, 34, 1, 10);
+    g.fillStyle = '#4a4a4f';
+    g.fillRect(60, 60, 4, 4); // roof texel
+  });
+}
+
+// Red/brown brick for schools, churches, civic and older walk-ups: 1 tile = 1 storey × 2 bays.
+function brickTexture() {
+  return canvasTexture(64, 64, (g) => {
+    g.fillStyle = '#9a5a46';
+    g.fillRect(0, 0, 64, 64);
+    for (let y = 0; y < 64; y += 4) {
+      for (let x = (y / 4) % 2 ? -4 : 0; x < 64; x += 8) {
+        const v = 140 + Math.random() * 40;
+        g.fillStyle = `rgb(${v | 0},${(v * 0.6) | 0},${(v * 0.5) | 0})`;
+        g.fillRect(x + 1, y + 1, 6, 3);
+      }
+    }
+    for (let x = 0; x < 2; x++) {
+      const lit = Math.random() < 0.2;
+      g.fillStyle = '#e8e2d4';
+      g.fillRect(x * 32 + 7, 14, 18, 28);
+      g.fillStyle = lit ? '#ffcf73' : '#2a313b';
+      g.fillRect(x * 32 + 9, 16, 14, 24);
+      g.fillStyle = '#e8e2d4';
+      g.fillRect(x * 32 + 15, 16, 2, 24);
+    }
+    g.fillStyle = '#4a4a4f';
+    g.fillRect(60, 60, 4, 4);
+  });
+}
+
+// Big-box stores and strip malls: tilt-up concrete panels with joints and a coloured
+// accent band along the top. One tile = 8 m wide × the whole wall height.
+function bigboxTexture() {
+  return canvasTexture(64, 64, (g) => {
+    g.fillStyle = '#d9d3c6';
+    g.fillRect(0, 0, 64, 64);
+    for (let i = 0; i < 400; i++) {
+      g.fillStyle = `rgba(0,0,0,${Math.random() * 0.06})`;
+      g.fillRect(Math.random() * 64, Math.random() * 64, 2, 2);
+    }
+    g.fillStyle = 'rgba(60,55,50,0.5)';
+    g.fillRect(0, 0, 1, 64);
+    g.fillRect(32, 0, 1, 64);
+    // Accent band near the top (tinted by vertex colour).
+    g.fillStyle = '#b8b0a2';
+    g.fillRect(0, 6, 64, 8);
+    // Low plinth.
+    g.fillStyle = '#a8a195';
+    g.fillRect(0, 58, 64, 6);
+    g.fillStyle = '#8d8b86';
+    g.fillRect(60, 60, 4, 4);
+  });
+}
+
+// Warehouses / industrial: ribbed metal cladding with a strip of high windows.
+// One tile = 4 m wide × 4 m tall.
+function industrialTexture() {
+  return canvasTexture(64, 64, (g) => {
+    g.fillStyle = '#b9bcc0';
+    g.fillRect(0, 0, 64, 64);
+    for (let x = 0; x < 64; x += 4) {
+      g.fillStyle = 'rgba(255,255,255,0.25)';
+      g.fillRect(x, 0, 1, 64);
+      g.fillStyle = 'rgba(0,0,0,0.18)';
+      g.fillRect(x + 2, 0, 1, 64);
+    }
+    g.fillStyle = '#5a6068';
+    g.fillRect(0, 60, 64, 4);
+    g.fillStyle = '#7d8187';
+    g.fillRect(60, 60, 4, 4);
+  });
+}
+
+// Parkades: open decks, a dark void between concrete slabs. One tile = 1 level × 8 m.
+function parkadeTexture() {
+  return canvasTexture(64, 64, (g) => {
+    g.fillStyle = '#22252b';
+    g.fillRect(0, 0, 64, 64);
+    g.fillStyle = '#b4b0a8';
+    g.fillRect(0, 0, 64, 10);
+    g.fillRect(0, 44, 64, 20);
+    g.fillStyle = '#8d8b86';
+    g.fillRect(60, 60, 4, 4);
+  });
+}
+
 function skyTexture() {
   return canvasTexture(2, 256, (g, w, h) => {
     const grad = g.createLinearGradient(0, 0, 0, h);
@@ -643,6 +752,32 @@ function buildSideRoads(roads, heightAt, asphalt, route) {
 // ---------- buildings ----------
 const TOWER_TINTS = [0xb8c4d6, 0xd9c2a7, 0x9fb0a8, 0xc9a9a6, 0xa8b8d8, 0xe0ddd5];
 const HOUSE_TINTS = [0xf2e6d0, 0xd8dde3, 0xc9d6c3, 0xe8d3b8, 0xb9c4cf, 0xd7c6c0, 0xf0efe9];
+const APT_TINTS = [0xe3d9c6, 0xcfc8bd, 0xd9d2c2, 0xc2c9bb, 0xd8cfc9, 0xe6e0d4];
+const BIGBOX_TINTS = [0xece6da, 0xe0dcd4, 0xf1efe9, 0xd9d4c8, 0xe9e3d3];
+const INDUSTRIAL_TINTS = [0xd5d8dc, 0xc3c8ce, 0xe3e5e8, 0xb9c4cf, 0xd8d3c6];
+const BRICK_TINTS = [0xffffff, 0xe8d9cf, 0xd8c7bd, 0xf0e4dc];
+// Building classes written by tools/build-maps.mjs.
+const C = { unknown: 0, house: 1, rowhouse: 2, apartments: 3, retail: 4, industrial: 5, office: 6, civic: 7, outbuilding: 8, hotel: 9, parking: 10, church: 11, school: 12, bigbox: 13 };
+// Wall style per class: texture key, tile size in metres (u, v), tints, and whether it is
+// a glass tower. Tall buildings of any class become towers.
+function wallStyle(cls, h, area) {
+  if (h >= 30) return { key: 'tower', uw: 14, vh: 14, tints: TOWER_TINTS };
+  switch (cls) {
+    case C.apartments: case C.hotel: return { key: 'apt', uw: 6, vh: 3, tints: APT_TINTS };
+    case C.retail: return area >= 1200 || h < 6 ? { key: 'bigbox', uw: 8, vh: h, tints: BIGBOX_TINTS } : { key: 'apt', uw: 6, vh: 3, tints: APT_TINTS };
+    case C.bigbox: return { key: 'bigbox', uw: 8, vh: h, tints: BIGBOX_TINTS };
+    case C.industrial: return { key: 'industrial', uw: 4, vh: 4, tints: INDUSTRIAL_TINTS };
+    case C.office: return h >= 14 ? { key: 'tower', uw: 14, vh: 14, tints: TOWER_TINTS } : { key: 'bigbox', uw: 8, vh: h, tints: BIGBOX_TINTS };
+    case C.civic: case C.school: case C.church: return { key: 'brick', uw: 6, vh: 3, tints: BRICK_TINTS };
+    case C.parking: return { key: 'parkade', uw: 8, vh: 3, tints: INDUSTRIAL_TINTS };
+    case C.outbuilding: return { key: 'house', uw: 6, vh: 3, tints: HOUSE_TINTS };
+    case C.house: case C.rowhouse: return { key: 'house', uw: 6, vh: 3, tints: HOUSE_TINTS };
+    default:
+      if (h >= 12) return { key: 'apt', uw: 6, vh: 3, tints: APT_TINTS };
+      if (area >= 900) return { key: 'bigbox', uw: 8, vh: h, tints: BIGBOX_TINTS };
+      return { key: 'house', uw: 6, vh: 3, tints: HOUSE_TINTS };
+  }
+}
 const ROOF_TINTS = [0x4a4d52, 0x5b4a3e, 0x3d4247, 0x6b5b4d, 0x2f3236, 0x5d6066];
 const FLAT_ROOF = 0x8d8b86;
 
@@ -749,9 +884,11 @@ function buildBuildings(list, heightAt, occupancy) {
     cx /= ring.length;
     cz /= ring.length;
     base -= 0.5;
-    const tower = h >= 12;
-    const tints = tower ? TOWER_TINTS : HOUSE_TINTS;
-    color.setHex(tints[Math.floor(hash(cx, cz) * tints.length)]);
+    const area0 = polyArea(ring);
+    const style = wallStyle(b.c ?? 0, h, area0);
+    const tower = style.key === 'tower';
+    color.setHex(style.tints[Math.floor(hash(cx, cz) * style.tints.length)]);
+    // Big boxes: the accent band and plinth come from the texture; the body gets the tint.
 
     // Orient the ring so each edge's normal (-dz, dx) points outward.
     let out = 0;
@@ -762,9 +899,10 @@ function buildBuildings(list, heightAt, occupancy) {
     }
     if (out < 0) ring = ring.reverse();
 
-    // Houses get a pitched (hip) roof when the footprint is roughly a rectangle.
-    const area = polyArea(ring);
-    const box = !tower && area < 900 ? orientedBox(ring) : null;
+    // Houses (and churches, garages) get a pitched (hip) roof when the footprint is roughly a rectangle.
+    const area = area0;
+    const roofable = style.key === 'house' || b.c === C.church;
+    const box = roofable && area < 900 ? orientedBox(ring) : null;
     const pitched = box && area / box.area > 0.72 && box.B > 2;
     const roofH = pitched ? Math.min(box.B * 0.55, h * 0.4, 4) : 0;
     const top = base + 0.5 + h - roofH;
@@ -772,10 +910,10 @@ function buildBuildings(list, heightAt, occupancy) {
     const roofY = top - parapet;
 
     const chunkKey = `${Math.floor(cx / 800)},${Math.floor(cz / 800)}`;
-    const mb = getChunk(`${chunkKey},${tower ? 't' : 'h'}`);
-    // Texture tiles: towers 4 floors × 4 bays (3.5 m each), houses 1 storey × 2 bays.
-    const winH = tower ? 14 : 3;
-    const winW = tower ? 14 : 6;
+    const mb = getChunk(`${chunkKey},${style.key}`);
+    // Texture tile size in metres for this wall style.
+    const winH = style.vh;
+    const winW = style.uw;
     let u = 0;
     for (let k = 0; k < ring.length; k++) {
       const [x1, z1] = ring[k];
@@ -863,17 +1001,19 @@ function buildBuildings(list, heightAt, occupancy) {
     }
     occupancy.addPolygon(ring);
   }
-  const towerTex = towerTexture();
-  const houseTex = houseTexture();
-  const roofTex = shingleTexture();
-  const towerMat = new THREE.MeshStandardMaterial({ map: towerTex, emissiveMap: towerTex, emissive: 0xffffff, emissiveIntensity: 0.3, vertexColors: true, roughness: 0.8 });
-  const houseMat = new THREE.MeshStandardMaterial({ map: houseTex, emissiveMap: houseTex, emissive: 0xffffff, emissiveIntensity: 0.12, vertexColors: true, roughness: 0.9 });
-  const roofMat = new THREE.MeshStandardMaterial({ map: roofTex, vertexColors: true, roughness: 0.95 });
+  const lit = (tex, glow, roughness = 0.9) => new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: glow, vertexColors: true, roughness });
+  const mats = {
+    tower: lit(towerTexture(), 0.3, 0.8),
+    house: lit(houseTexture(), 0.12),
+    apt: lit(aptTexture(), 0.12),
+    brick: lit(brickTexture(), 0.1),
+    bigbox: new THREE.MeshStandardMaterial({ map: bigboxTexture(), vertexColors: true, roughness: 0.95 }),
+    industrial: new THREE.MeshStandardMaterial({ map: industrialTexture(), vertexColors: true, roughness: 0.6, metalness: 0.2 }),
+    parkade: new THREE.MeshStandardMaterial({ map: parkadeTexture(), vertexColors: true, roughness: 0.95 }),
+    r: new THREE.MeshStandardMaterial({ map: shingleTexture(), vertexColors: true, roughness: 0.95 }),
+  };
   const group = new THREE.Group();
-  for (const [key, mb] of chunks) {
-    const mat = key.endsWith('t') ? towerMat : key.endsWith('r') ? roofMat : houseMat;
-    group.add(new THREE.Mesh(mb.build(), mat));
-  }
+  for (const [key, mb] of chunks) group.add(new THREE.Mesh(mb.build(), mats[key.split(',')[2]] ?? mats.house));
   return group;
 }
 
@@ -978,8 +1118,9 @@ function buildSigns(list, route, heightAt) {
     const signH = Math.min(big ? 2.4 : 1.1, h * 0.35);
     const signW = Math.min(signH * aspect, best.len * 0.9);
     const cy = top - signH * 0.8 - (big ? 0.6 : 0.3);
-    let ex = (best.x2 - best.x1) / best.len;
-    let ez = (best.z2 - best.z1) / best.len;
+    // Text runs left→right as seen from outside: the normal rotated a quarter turn.
+    let ex = best.nz;
+    let ez = -best.nx;
     const off = 0.08;
     const a = V(best.mx - ex * signW / 2 + best.nx * off, cy - signH / 2, best.mz - ez * signW / 2 + best.nz * off);
     const c = V(best.mx + ex * signW / 2 + best.nx * off, cy + signH / 2, best.mz + ez * signW / 2 + best.nz * off);
@@ -994,18 +1135,22 @@ function buildSigns(list, route, heightAt) {
       const ph = far > 60 ? 4 : 3;
       const pw = Math.min(11, ph * aspect);
       const py0 = gy + (far > 60 ? 9 : 6);
-      [ex, ez] = tangent;
+      void tangent;
       post.quad(V(px2 - 0.2, gy, pz2 - 0.2), V(px2 + 0.2, gy, pz2 - 0.2), V(px2 + 0.2, py0, pz2 - 0.2), V(px2 - 0.2, py0, pz2 - 0.2));
       post.quad(V(px2 + 0.2, gy, pz2 + 0.2), V(px2 - 0.2, gy, pz2 + 0.2), V(px2 - 0.2, py0, pz2 + 0.2), V(px2 + 0.2, py0, pz2 + 0.2));
       post.quad(V(px2 - 0.2, gy, pz2 + 0.2), V(px2 - 0.2, gy, pz2 - 0.2), V(px2 - 0.2, py0, pz2 - 0.2), V(px2 - 0.2, py0, pz2 + 0.2));
       post.quad(V(px2 + 0.2, gy, pz2 - 0.2), V(px2 + 0.2, gy, pz2 + 0.2), V(px2 + 0.2, py0, pz2 + 0.2), V(px2 + 0.2, py0, pz2 - 0.2));
-      // Two-sided panel facing along the road direction (readable while driving past).
-      const dx = -ez * pw / 2;
-      const dz = ex * pw / 2;
+      // Two-sided panel facing along the road (readable while driving past). Each face's
+      // text runs left→right as seen from its own side.
+      const [tX, tZ] = tangent;
       for (const sgn of [1, -1]) {
-        const nn = V(ex * sgn, 0, ez * sgn);
-        faceQuad(mb, V(px2 - dx + ex * 0.03 * sgn, py0, pz2 - dz + ez * 0.03 * sgn), V(px2 + dx + ex * 0.03 * sgn, py0, pz2 + dz + ez * 0.03 * sgn),
-          V(px2 + dx + ex * 0.03 * sgn, py0 + ph, pz2 + dz + ez * 0.03 * sgn), V(px2 - dx + ex * 0.03 * sgn, py0 + ph, pz2 - dz + ez * 0.03 * sgn),
+        const nn = V(tX * sgn, 0, tZ * sgn);
+        const rx = nn.z;
+        const rz = -nn.x;
+        const ox = nn.x * 0.03;
+        const oz = nn.z * 0.03;
+        faceQuad(mb, V(px2 - rx * pw / 2 + ox, py0, pz2 - rz * pw / 2 + oz), V(px2 + rx * pw / 2 + ox, py0, pz2 + rz * pw / 2 + oz),
+          V(px2 + rx * pw / 2 + ox, py0 + ph, pz2 + rz * pw / 2 + oz), V(px2 - rx * pw / 2 + ox, py0 + ph, pz2 - rz * pw / 2 + oz),
           [u0, v0, u1, v0, u1, v1, u0, v1], null, nn);
       }
     }
@@ -1015,6 +1160,102 @@ function buildSigns(list, route, heightAt) {
     new THREE.Mesh(mb.build(), new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.5 })),
     new THREE.Mesh(post.build(), new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.6, side: THREE.DoubleSide })),
   );
+  return group;
+}
+
+// ---------- highway exit signs ----------
+// Green guide signs with the real ramp destinations (from OpenStreetMap `destination`
+// tags): a ground sign ~300 m before the exit and a cantilever sign over the exit lane.
+function guideSignTexture(lines, ref, arrow) {
+  const c = document.createElement('canvas');
+  c.width = 512;
+  c.height = 256;
+  const g = c.getContext('2d');
+  g.fillStyle = '#146b3a';
+  g.fillRect(0, 0, 512, 256);
+  g.strokeStyle = '#f4f4f0';
+  g.lineWidth = 8;
+  g.strokeRect(8, 8, 496, 240);
+  g.fillStyle = '#f4f4f0';
+  g.textAlign = 'left';
+  g.textBaseline = 'middle';
+  let y = 60;
+  if (ref) {
+    g.font = 'bold 34px -apple-system, Helvetica, Arial, sans-serif';
+    g.fillText(`EXIT ${ref}`, 28, 40);
+    y = 92;
+  }
+  const n = lines.length;
+  const size = n >= 3 ? 44 : n === 2 ? 54 : 64;
+  g.font = `bold ${size}px -apple-system, Helvetica, Arial, sans-serif`;
+  const step = n >= 3 ? 56 : 70;
+  const startY = ref ? y : 128 - ((n - 1) * step) / 2;
+  lines.forEach((t, i) => {
+    let text = t;
+    while (g.measureText(text).width > 400 && text.length > 4) text = text.slice(0, -2);
+    g.fillText(text, 28, startY + i * step);
+  });
+  // Arrow at the right.
+  g.font = 'bold 90px -apple-system, Helvetica, Arial, sans-serif';
+  g.textAlign = 'right';
+  g.fillText(arrow, 492, 200);
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  return tex;
+}
+
+function buildExitSigns(route, exits) {
+  const group = new THREE.Group();
+  if (!exits?.length) return group;
+  const postMat = new THREE.MeshStandardMaterial({ color: 0x6e737a, roughness: 0.5, metalness: 0.5 });
+  const backMat = new THREE.MeshStandardMaterial({ color: 0x5a5e63, roughness: 0.7 });
+  const postGeo = new THREE.CylinderGeometry(0.08, 0.08, 1, 8);
+  const place = (s, lat, y, w, h, tex, armLen) => {
+    if (s < 20 || s > route.length - 60) return;
+    const yaw = route.yaw(s);
+    const g = new THREE.Group();
+    g.position.copy(route.toWorld(s, lat, 0));
+    g.rotation.y = yaw;
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.2, roughness: 0.5 }));
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(w, h), backMat);
+    // Signs face oncoming drivers (+z locally, since the route runs towards -z).
+    face.position.set(armLen ? -armLen : 0, y, 0.03);
+    back.position.set(armLen ? -armLen : 0, y, -0.03);
+    back.rotation.y = Math.PI;
+    g.add(face, back);
+    if (armLen) {
+      const post = new THREE.Mesh(postGeo, postMat);
+      post.scale.set(2.2, y + h / 2 + 0.2, 2.2);
+      post.position.y = (y + h / 2 + 0.2) / 2;
+      const arm = new THREE.Mesh(postGeo, postMat);
+      arm.scale.set(1.4, armLen, 1.4);
+      arm.rotation.z = Math.PI / 2;
+      arm.position.set(-armLen / 2, y + h / 2 + 0.1, 0);
+      g.add(post, arm);
+    } else {
+      for (const dx of [-w / 2 + 0.3, w / 2 - 0.3]) {
+        const post = new THREE.Mesh(postGeo, postMat);
+        post.scale.set(1, y - h / 2 + 0.1, 1);
+        post.position.set(dx, (y - h / 2 + 0.1) / 2, 0);
+        g.add(post);
+      }
+    }
+    group.add(g);
+  };
+  for (const e of exits) {
+    const arrow = e.side > 0 ? '➚' : '➚';
+    const tex = guideSignTexture(e.text, e.ref, e.side > 0 ? '⬈' : '⬉');
+    const f0 = route.frame(Math.max(0, e.s - 320));
+    const edge0 = e.side > 0 ? f0.right + 3.5 : f0.left - 3.5;
+    place(e.s - 320, edge0, 4.2, 7.0, 3.5, tex, 0);
+    const f1 = route.frame(Math.max(0, e.s - 70));
+    const edge1 = e.side > 0 ? f1.right + 1.2 : f1.left - 1.2;
+    // Cantilever over the exit lane: the arm reaches back over the road from the post.
+    const armLen = e.side > 0 ? 5.5 : -5.5;
+    place(e.s - 70, edge1, 7.2, 7.0, 3.5, tex.clone(), armLen);
+    void arrow;
+  }
   return group;
 }
 
@@ -1227,6 +1468,7 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
     buildSideRoads(data.roads, heightAt, asphalt, route),
     buildBuildings(data.buildings, heightAt, occupancy),
     buildSigns(data.buildings, route, heightAt),
+    buildExitSigns(route, data.exits),
     buildTrees(route, heightAt, occupancy, data.water),
     buildStreetLights(route),
     buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : data.name.toUpperCase()),

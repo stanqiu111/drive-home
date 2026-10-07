@@ -31,7 +31,9 @@ npm run preview    # serve the production build
 ## Code map (`src/`)
 
 - `main.js`: game loop, menu, HUD, race flow, driving physics, collisions, cameras, leaderboard and achievements UI.
-  - `MAPS` holds per-map menu text, km, cheer and ending theme.
+  - `MAPS` = `public/maps/index.json` (written by the builder: km, route polyline, street list, lights, curves, bridge/highway metres, climb, landmarks) merged with `MAP_INFO` (destination label, 2-sentence description, cheer, ending theme). Add new maps to `MAP_INFO` and to `NEW_MAPS` for the "New" badge.
+  - The map-select screen groups routes by start point (`GROUPS`), draws north-up route maps as inline SVG, difficulty stars and badges from the index facts, and a detail panel with description, rush-hour race bar and online rank.
+  - HUD landmark callouts come from `data.landmarks` in each map file.
   - A dev-only hook, `window.__game`, exposes `S`, `route`, `startRace`, `finish`, `selectMap`, `selectCar`, `activatePower`, `progress` and `orbit` for automated checks.
 - `route.js`: works in route space.
   - `s` = metres along the route; `lat` = sideways offset (+ = right). Convert with `toWorld(s, lat, h)`.
@@ -39,9 +41,12 @@ npm run preview    # serve the production build
 - `world.js`: builds a map from its JSON:
   - terrain (carved under the road) and water
   - the road, curbs and sidewalks (broken at side streets), bridges (Walterdale arches on `home`) and lane markings
-  - side streets that ramp into junctions
-  - buildings: hip roofs on houses, parapets and rooftop units on flat roofs
+  - side streets that ramp into junctions; side streets tagged as bridges over level ground become overpasses with ramps and piers
+  - buildings: each has a class (`c`: house, rowhouse, apartments, retail, industrial, office, civic, outbuilding, hotel, parking, church, school, bigbox) and `wallStyle()` picks the texture: house siding, stucco with balconies, brick (schools, civic, heritage zones), tilt-up panels for big boxes, ribbed metal for warehouses, glass towers, concrete slab towers, parkades; hip roofs on houses, parapets and rooftop units on flat roofs; `BRANDS` colours known chains
+  - store signs (`buildSigns`): real business names on the road-facing wall plus roadside pylon signs for big lots, packed into one texture atlas
+  - exit guide signs (`buildExitSigns`) from OSM ramp `destination` tags
   - trees, street lights and the finish banner
+- `landmarks.js` + `landmark-list.js` + `landmarks/<id>.js`: hand-made landmark models placed by latitude/longitude on whichever map covers them (Legislature, downtown skyline, Muttart, Hotel Macdonald, High Level Bridge, Rossdale plant, refineries, water tower, Lafarge, container yard, Snow Valley). `landmark-studio.html?id=<id>` renders one model from four angles for checking; `landmarks/_example.js` documents the module contract.
 - `cars.js`: six team cars, each body lofted from its real dimensions.
   - The cars: Tesla Model X, Honda CR-V, Honda Accord, Lexus IS 300, Subaru Legacy, Kia Carnival.
   - Shape comes from the `side`, `plan` and `cabin` keyframes plus a per-car `section` style.
@@ -67,7 +72,10 @@ npm run preview    # serve the production build
   - buildings from City of Edmonton Rooflines (SODA dataset `jpxi-a9a5`)
   - terrain from NRCan MRDEM-30
 - It needs `tools/cache/alberta-latest.osm.pbf` (about 350 MB), from https://download.geofabrik.de/north-america/canada/alberta-latest.osm.pbf. `tools/cache/` is gitignored; the other downloads cache there automatically.
-- **Adding a map:** add it to `MAPS` in both `tools/build-maps.mjs` and `src/main.js`. Also add its id to the `map in (...)` check in `supabase/schema.sql` and re-run the SQL; otherwise posting times on that map fails.
+- Maps can have their own `start` (lon/lat) and `from` label; the two downtown maps start on 107 St by the Legislature (a public street). The route's elevation gets a 6.5 m hump where it crosses another road on a bridge over level ground (the DEM shows no structures).
+- Building classes come from OSM tags, then City of Edmonton zoning polygons (`fixa-tstc`, cached per map), then OSM land use, then size. Footprints under a landmark's `excludeR` are dropped. Named buildings keep their OSM name (`n`) for signs.
+- **Adding a map:** add it to `MAPS` in `tools/build-maps.mjs` and to `MAP_INFO` in `src/main.js`, rebuild, then add its id to BOTH `map in (...)` checks in `supabase/schema.sql` and re-run the SQL; otherwise posting times on that map fails.
+- **Adding a landmark:** add an entry to `src/landmark-list.js`, write `src/landmarks/<id>.js`, check it with `landmark-studio.html`, then rebuild the maps so footprints under it are dropped and the route callout is written.
 
 ## Database (Supabase free tier)
 
@@ -85,4 +93,4 @@ npm run preview    # serve the production build
 
 ## Wishlist (not done yet)
 
-Engine and horn sounds plus music, police chasing speeders, buses and trucks, rain or night driving.
+Engine and horn sounds plus music, police chasing speeders, buses and trucks, rain or night driving, house styles by era (bungalows vs two-storeys with front garages), LRT trains beside 114 St / 111 St.

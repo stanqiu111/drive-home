@@ -14,7 +14,8 @@ Three.js + Vite, plain JavaScript ES modules, no framework.
 - Keep the data attribution credits in the menu (OpenStreetMap, City of Edmonton, NRCan).
 - "Cam" is a teammate. The E-bike is Cam's; the plain Bicycle belongs to no one.
 - The owner cares a lot that each car looks like its real model. After changing a car, render it from several angles and compare.
-- Pushing to `main` deploys to production automatically (Vercel is connected to GitHub). Afterwards, confirm with `npx vercel ls drive-home`.
+- Pushing to `main` deploys to production automatically (Vercel is connected to GitHub). **Never push to `main` (or deploy live) until the owner says so.** Finish and check work locally, show the owner, then ask. Work in progress goes on a branch. After an approved push, confirm with `npx vercel ls drive-home`.
+- **No co-author lines.** Don't add `Co-Authored-By: Claude …` or "Generated with Claude Code" to commits or PRs. When merging helper-agent commits that carry one, squash or rewrite them.
 
 ## Commands
 
@@ -99,10 +100,80 @@ Lane lines were wrong from the first version on: short double-yellow lines poppe
 
 ## Testing
 
-- There are no unit tests. Check changes by running the dev server and driving the game with headless Chrome (puppeteer-core) and screenshots. Use `window.__game` to jump along the route (`S.s`), start races and finish.
+- There are no unit tests. Check changes by running the dev server and driving the game with headless Chrome (puppeteer-core, a dev dependency) and screenshots. Use `window.__game` to jump along the route (`S.s`), start races and finish.
+- `node tools/dev/shots.mjs <map> <s,s,...>` saves a driver's view and a high view at each route position and prints fps. Write other throwaway test scripts outside the repo.
 - Test UI through real clicks. A past bug deleted the Start button handlers, and tests that started races via the hook didn't notice.
 - After world or car changes, check fps (target 60) and menu load time on the biggest maps (`home`, `sherwood`).
 
+## Status and handoff (2026-10-08)
+
+The owner switched computers mid-task. This section is the compressed history and the to-do list; delete items as they get done.
+
+### Where things are
+
+- **Live** (`main`, last deploy `dcaca2c`): 8 maps, landmarks, the map-select screen, building styles, store and exit signs, overpasses, online leaderboard and achievements.
+- **Branch `wip/road-lines-and-sound`** (not live, waiting for the owner's OK). It holds the road-line fix, the line check in `npm run build`, these notes and `tools/dev/shots.mjs`. To go live once the owner approves: merge into `main` and push.
+
+### Owner to-dos
+
+- If not already done since 2026-10-07: paste all of `supabase/schema.sql` into Supabase → SQL Editor and run it. Its map list now includes `snowvalley` and `refinery`; without it, posting times on those two maps fails.
+- `menu.png` and `race.png` in the project folder are old screenshots and can be deleted.
+
+### Unfinished work, in order
+
+1. **Things on the driven road (bugs from the 2026-10-07 overpass and hump work).** The 2026-10-05 smooth-road fix still holds: terrain never pokes through the road. But a road audit on 2026-10-08 found new problems. Fix the root causes and add a check to `npm run build` so they can't return:
+   - **Side-road overpasses** (`buildSideRoads` in `world.js`).
+     - What it does now: every short side bridge near level ground is lifted 6.5 m above its own ends. It gets 70 m straight ramps, embankments and piers every 25 m, and nothing checks where these land.
+     - Where it goes wrong: earth ramps or embankments across the lanes on home/noodle at s 2924–2972 (Gateway at the Henday) and s 5198–5210 / 5288–5300 (23 Ave); sherwood s 12809–12822; snowvalley s 470–510; refinery s 1690–1762 (its deck is only 3.5 m up at s 1760). Piers stand in lanes on home/noodle at s 3453 and s 4756, and on sherwood at s 9067, 9078 and 11197. A deck sits only 2.5 m above the road on snowvalley at s 9362.
+     - The plan: only lift side bridges that actually cross over the route. Put the deck at route height plus 5.5 m clearance. End ramps before the road, and never put piers on a road. Put these decisions in a pure module the Node check can test, the way `lane-layout.js` is used.
+   - **Route humps** (`tools/build-maps.mjs`, "Overpasses: a bridge run…").
+     - Problems: two humps 64 m apart add up into a camel back on refinery at s 8780–8952. Humps over creeks with nothing underneath on windermere at s 2454–2532 and 6984–7030. A deck 11 m up on windermere at s 2034–2166, and sharp crests at the ramp ends.
+     - Also, side roads that join on a hump ramp get dragged 5–6 m up (windermere s 2009 and 2185; snowvalley s 8100 and 8203).
+     - The plan: hump only where a road or railway passes underneath. Lift only as much as clearance needs, take the larger of overlapping lifts instead of adding them, use gentle ramps, and leave side roads at ground level.
+   - **High Level Bridge model** (`landmarks/highlevel.js`, snowvalley). It's a straight truss and the route curves in and out of it. Truss posts stand in the lanes at s 1041–1045 and 1728–1739, and members hang 2.7–4.2 m over the road. Its own deck sits 0.2 m above the game road at s 1144–1316, which hides the lane lines. The plan: give landmark modules the route (a `ctx.route(x, z)` helper), keep a clear box over the road, and add a dev warning when any landmark intrudes on the road.
+   - **Older, cosmetic:** sidewalk folds over the lanes on the 5 m turn near the sherwood finish (s 22064–22194). Side roads clip the underside of real bridges (home s 8174–8231; refinery s 1359–1810 and 11350–11424).
+2. **Sound effects** (owner asked 2026-10-08; nothing built yet). Build them procedurally with Web Audio in `src/sound.js`: no files, no network.
+   - Engine per vehicle with gear shifts: Subaru boxer rumble, Kia van, electric whine for the Model X and Cam's E-bike, freewheel ticking for the Bicycle, a Rocket roar that grows at lift-off, playful sounds for the fun rides.
+   - Effects: nitro whoosh, tyre squeal, wind, strength-aware crash, a different smash for the Rocket/shield, chimes for nitro cans and ? boxes plus a stinger per power, 3-2-1-GO, finish fanfare, achievement chime, pass-by whoosh, soft UI clicks.
+   - Horn on H (a bell on bikes), with a horn button on touch screens.
+   - Mute: M key and a 🔊 button, remembered across visits. Start audio on the first gesture.
+   - Add a dev page `sound-studio.html` so the owner can audition every sound before approving.
+   - Then test it (events fire once, no node leaks, 60 fps, no clipping) and review the mix. Music stays on the wishlist.
+3. **Look at the road lines across all 8 maps.** `npm run check:roads` passes, and the owner's screenshot spot is fixed: 91 St SW at s ≈ 450, on every route that starts in Summerside. A full screenshot pass over every lane change, divided/undivided switch, centre turn lane and signal was started but never finished.
+4. **Lane-line follow-ups** (lower priority):
+   - The kerb bulges a little where a divided road meets an undivided one.
+   - `turn:lanes` / `lanes:both_ways` aren't extracted, so turn bays are placed by rule.
+   - Lane-0 traffic glides 3.5 m when a two-way road adds a lane on the right.
+   - Edge lines aren't broken at side-street mouths, only at signals.
+
+### How the road-line fix works (2026-10-08)
+
+The owner reported a double yellow appearing in the middle of a one-way road (91 St SW, ~450 m after the Summerside start) and said it was "broken again". The history showed the line code and lane data had never changed since the first commit: the bug was there from day one. The fix, its rule and its check are under "Road lines" above.
+
+### Compressed history
+
+- **Oct 5:** 3D Three.js game: beat the commute on real Edmonton roads.
+  - Maps from the Summerside start (91 St SW, a public spot): Downtown (ends by the Legislature), Windermere, Sherwood Park, Odd Burger, Summerside Beach Club, Noodle Feast.
+  - The team's six cars, Cam's E-bike, a plain Bicycle, and fun rides (Poutine, Oilers Jersey, Rogers Place; the Sofa was removed later).
+  - Nitro cans and ? boxes, smoother road surfaces, and the Vercel + GitHub + Supabase setup.
+  - Online leaderboard with one fixed name per player; achievements that unlock the Rocket (endless nitro, lifts off above 250 km/h); themed endings per map; a pinned Start button.
+  - A modelling overhaul of cars, rocket, roads, buildings, trees and signals.
+- **Oct 6:** CLAUDE.md written so work can continue from another computer.
+- **Oct 7:**
+  - Building styles from zoning, store and exit signs, overpasses and humps.
+  - Two downtown routes: Snow Valley to the south, Refinery Row to the east.
+  - A new map-select screen (route maps, stars, badges, rush-hour bar, rank).
+  - 13 hand-made landmarks with HUD callouts.
+- **Oct 8:** landmark fixes (refinery follows the terrain, the Legislature terrace is off the road, callout sides fixed), then the road-line rewrite above, the road audit (to-do 1) and the sound request (to-do 2). The owner asked: approve before any deploy, and no co-author lines.
+
+### Landmark caveats (unverified details)
+
+- Legislature portico column count.
+- Rossdale heights and windows.
+- Lafarge yard layout (invented).
+- Water tower colours and lettering.
+- Suncor lies outside every map's terrain, so it never shows.
+
 ## Wishlist (not done yet)
 
-Engine and horn sounds plus music, police chasing speeders, buses and trucks, rain or night driving, house styles by era (bungalows vs two-storeys with front garages), LRT trains beside 114 St / 111 St.
+Engine and horn sounds plus music (sound effects are to-do 2 above), police chasing speeders, buses and trucks, rain or night driving, house styles by era (bungalows vs two-storeys with front garages), LRT trains beside 114 St / 111 St.

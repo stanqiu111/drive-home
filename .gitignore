@@ -5,3 +5,6 @@ tools/cache
 .env*.local
 .vercel
 .env*
+
+# Claude Code helper worktrees
+.claude/worktrees/

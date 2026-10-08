@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { LANDMARK_LIST } from './landmark-list.js';
+import { SKYLINE_TOWERS } from './landmarks/skyline-data.js';
 
 // Real Edmonton landmarks, placed by latitude/longitude on any map whose ground covers
 // them. Each model lives in src/landmarks/<id>.js and exports `build(ctx)`, which returns
@@ -40,17 +41,43 @@ function materialFor(color, finish = 'matte', extra = {}) {
 // All landmark modules, discovered at build time.
 const modules = import.meta.glob('./landmarks/*.js', { eager: true });
 
-export function landmarkContext(entry) {
+export function landmarkContext(entry, ground = () => null, onRoad = () => false) {
   return {
     mat: materialFor,
     entry,
     // Metres from this landmark's origin to another lon/lat (x east, z south).
     local: (lon, lat) => projectTo([entry.lon, entry.lat], lon, lat),
+    // Terrain height at model-local (x, z) relative to the model origin, or null when unknown
+    // (always null in the landmark studio, which has flat ground).
+    ground,
+    // True when model-local (x, z) is on or right beside a road (always false in the studio);
+    // use it to keep trees and props off the streets around a landmark.
+    onRoad,
   };
 }
 
-// Place every landmark that falls on this map. `heightAt(x, z)` gives ground height or null.
-export function buildLandmarks(data, heightAt) {
+// excludeBox = [halfWidth, halfDepth, offsetEast = 0, offsetSouth = 0] in metres.
+const boxOf = (L, x, z) => ({ x: x + (L.excludeBox[2] ?? 0), z: z + (L.excludeBox[3] ?? 0), hw: L.excludeBox[0], hd: L.excludeBox[1] });
+
+// Ground area each landmark on this map occupies, as boxes in map metres.
+export function landmarkFootprints(data) {
+  const out = [];
+  for (const L of LANDMARK_LIST) {
+    const [x, z] = projectTo(data.origin, L.lon, L.lat);
+    if (L.excludeBox) out.push(boxOf(L, x, z));
+    else if (L.excludeR > 0) out.push({ x, z, hw: L.excludeR, hd: L.excludeR });
+  }
+  for (const T of SKYLINE_TOWERS) {
+    if (!(T.excludeR > 0)) continue;
+    const [x, z] = projectTo(data.origin, T.lon, T.lat);
+    out.push({ x, z, hw: T.excludeR, hd: T.excludeR });
+  }
+  return out;
+}
+
+// Place every landmark that falls on this map. `heightAt(x, z)` gives ground height or null;
+// `onRoad(x, z)` says whether a map point is on a road.
+export function buildLandmarks(data, heightAt, onRoad = () => false) {
   const group = new THREE.Group();
   for (const L of LANDMARK_LIST) {
     const mod = modules[`./landmarks/${L.id}.js`];
@@ -58,9 +85,15 @@ export function buildLandmarks(data, heightAt) {
     const [x, z] = projectTo(data.origin, L.lon, L.lat);
     const g = heightAt(x, z);
     if (g == null) continue;
-    const model = mod.build(landmarkContext(L));
-    model.position.set(x, g + (mod.sink ?? 0), z);
-    model.rotation.y = -(L.yaw ?? 0) * DEG;
+    const base = g + (mod.sink ?? 0), a = -(L.yaw ?? 0) * DEG, c = Math.cos(a), sn = Math.sin(a);
+    const toMap = (lx, lz) => [x + lx * c + lz * sn, z - lx * sn + lz * c];
+    const ground = (lx, lz) => {
+      const h = heightAt(...toMap(lx, lz));
+      return h == null ? null : h - base;
+    };
+    const model = mod.build(landmarkContext(L, ground, (lx, lz) => onRoad(...toMap(lx, lz))));
+    model.position.set(x, base, z);
+    model.rotation.y = a;
     model.name = `landmark:${L.id}`;
     group.add(model);
   }

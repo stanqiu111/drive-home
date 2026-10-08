@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Route, LANE_W } from './route.js';
-import { buildLandmarks } from './landmarks.js';
+import { buildLandmarks, landmarkFootprints } from './landmarks.js';
 
 const FOG_NEAR = 250;
 const FOG_FAR = 1800;
@@ -1431,6 +1431,9 @@ class Occupancy {
     }
     for (let x = minX - 2; x <= maxX + 2; x += this.cell) for (let z = minZ - 2; z <= maxZ + 2; z += this.cell) this.mark(x, z);
   }
+  addBox(x0, z0, x1, z1) {
+    for (let x = x0; x <= x1; x += this.cell) for (let z = z0; z <= z1; z += this.cell) this.mark(x, z);
+  }
   addLine(ax, az, bx, bz, hw) {
     const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 2) + 1;
     for (let k = 0; k <= n; k++) {
@@ -1616,6 +1619,11 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
   for (const r of data.roads) {
     for (let k = 2; k < r.p.length; k += 2) occupancy.addLine(r.p[k - 2] / 10, r.p[k - 1] / 10, r.p[k] / 10, r.p[k + 1] / 10, r.w / 2 + 1);
   }
+  // Road cells only (route + side roads, with a margin), so landmark props can keep off them.
+  const roadCells = new Set(occupancy.set);
+  const onRoad = (x, z) => roadCells.has(occupancy.key(x, z));
+  // No trees inside landmark sites (refineries, the Legislature grounds…).
+  for (const f of landmarkFootprints(data)) occupancy.addBox(f.x - f.hw, f.z - f.hd, f.x + f.hw, f.z + f.hd);
 
   group.add(
     ...buildTerrain(data.terrain, heights, data.water),
@@ -1625,7 +1633,7 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
     buildBuildings(data.buildings, heightAt, occupancy),
     buildSigns(data.buildings, route, heightAt),
     buildExitSigns(route, data.exits),
-    buildLandmarks(data, heightAt),
+    buildLandmarks(data, heightAt, onRoad),
     buildTrees(route, heightAt, occupancy, data.water),
     buildStreetLights(route),
     buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : data.name.toUpperCase()),

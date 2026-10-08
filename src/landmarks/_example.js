@@ -4,8 +4,10 @@ import * as THREE from 'three';
 // build(ctx) returns a THREE.Group in metres: x = east, z = south, y = up; the origin is
 // ground level under the landmark's lon/lat. ctx.mat(color, finish) gives cached
 // materials (finish: matte | glossy | metal | glass | glow). ctx.local(lon, lat) converts
-// another coordinate into metres from this origin. Keep models cheap (a few thousand
-// triangles): merge repeated parts where you can.
+// another coordinate into metres from this origin. ctx.ground(x, z) gives the real terrain
+// height relative to the origin (null in the studio, so keep a fallback) for sites on slopes;
+// ctx.onRoad(x, z) says whether a spot is on a road, to keep trees and props off streets.
+// Keep models cheap (a few thousand triangles): merge repeated parts where you can.
 export const sink = 0; // optional: raise/lower the whole model (m)
 
 export function build(ctx) {

@@ -785,6 +785,7 @@ function updateChaseCamera(dt) {
 }
 
 let orbitAngle = null; // fixed angle for screenshots (dev hook)
+let devCam = null; // {pos, look, fov} free camera for screenshots (dev hook)
 function updateMenuCamera(t) {
   const a = orbitAngle ?? t * 0.25;
   const c = player.position;
@@ -901,6 +902,12 @@ function frame(now) {
   }
   updateFx(t);
   updateHud(dt);
+  if (devCam) {
+    camera.position.set(...devCam.pos);
+    camera.lookAt(...devCam.look);
+    camera.fov = devCam.fov ?? 60;
+    camera.updateProjectionMatrix();
+  }
   renderer.render(scene, camera);
 }
 
@@ -917,6 +924,7 @@ if (import.meta.env.DEV) {
     get route() { return route; },
     get world() { return world; },
     set orbit(a) { orbitAngle = a; },
+    set cam(v) { devCam = v; },
   };
 }
 

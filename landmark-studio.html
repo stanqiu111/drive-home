@@ -18,14 +18,13 @@ renderer.setScissorTest(true);
 setLandmarkEnvMap(new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xb8c4cc);
-scene.fog = new THREE.Fog(0xe0866a, 250, 1800);
 scene.add(new THREE.HemisphereLight(0xffe2c4, 0x3a3a4a, 1.6));
 const sun = new THREE.DirectionalLight(0xffc28f, 2.0);
 sun.position.set(-300, 250, -600);
 scene.add(sun);
 scene.add(new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x86a04c, roughness: 1 })));
 // A 10 m grid marker so sizes can be judged.
-scene.add(new THREE.GridHelper(400, 40, 0x444444, 0x666666));
+scene.add(new THREE.GridHelper(2000, 200, 0x444444, 0x666666));
 const entry = LANDMARK_LIST.find((e) => e.id === id) ?? { id, lon: 0, lat: 0, yaw: 0 };
 const mod = await import(`/src/landmarks/${id}.js`);
 const model = mod.build(landmarkContext(entry));
@@ -35,6 +34,7 @@ const box = new THREE.Box3().setFromObject(model);
 const size = box.getSize(new THREE.Vector3());
 const center = box.getCenter(new THREE.Vector3());
 const dist = Number(q.get('dist')) || Math.max(size.x, size.y, size.z) * 1.6;
+scene.fog = new THREE.Fog(0xe0866a, dist * 1.2, dist * 5);
 const cam = new THREE.PerspectiveCamera(40, (W / 2) / (H / 2), 1, 20000);
 const VIEWS = [[-35, 18], [55, 12], [215, 25], [145, 50]]; // [azimuth deg from north, elevation deg]
 VIEWS.forEach(([az, el], i) => {

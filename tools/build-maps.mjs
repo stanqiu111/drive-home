@@ -926,14 +926,19 @@ async function buildMap(m, ptsGlobal, osm) {
   // Landmarks on this map: generic footprints under hand-made models are dropped, and the
   // ones the route passes get a callout (name + where along the route).
   const landmarkXY = LANDMARK_LIST.map((L) => ({ ...L, xy: P(L.lon, L.lat) }));
-  const excluded = (x, z) => landmarkXY.some((L) => L.excludeR > 0 && Math.hypot(L.xy[0] - x, L.xy[1] - z) < L.excludeR)
+  const excluded = (x, z) => landmarkXY.some((L) => (L.excludeR > 0 && Math.hypot(L.xy[0] - x, L.xy[1] - z) < L.excludeR)
+    || (L.excludeBox && Math.abs(x - L.xy[0] - (L.excludeBox[2] ?? 0)) < L.excludeBox[0] && Math.abs(z - L.xy[1] - (L.excludeBox[3] ?? 0)) < L.excludeBox[1]))
     || skylineTowers.some((T) => Math.hypot(T.xy[0] - x, T.xy[1] - z) < (T.excludeR || 0));
   const mapLandmarks = [];
   for (const L of landmarkXY) {
     if (!L.callout) continue;
     const nr = index.nearest(L.xy[0], L.xy[1], L.seeFrom);
     if (!nr) continue;
-    mapLandmarks.push({ name: L.callout, s: nr.i * STEP, side: lateral(nr.i, L.xy[0], L.xy[1]) >= 0 ? 1 : -1, x: Math.round(L.xy[0]), z: Math.round(L.xy[1]) });
+    // Side as seen while it comes up (the callout shows from 160 m before), measured to the
+    // middle of the site rather than the model origin.
+    const cx = L.xy[0] + (L.excludeBox?.[2] ?? 0), cz = L.xy[1] + (L.excludeBox?.[3] ?? 0);
+    const side = lateral(Math.max(0, nr.i - Math.round(100 / STEP)), cx, cz) >= 0 ? 1 : -1;
+    mapLandmarks.push({ name: L.callout, s: nr.i * STEP, side, x: Math.round(L.xy[0]), z: Math.round(L.xy[1]) });
   }
   mapLandmarks.sort((a, b) => a.s - b.s);
   log(`  landmarks on route: ${mapLandmarks.map((l) => l.name).join(', ') || 'none'}`);

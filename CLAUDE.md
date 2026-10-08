@@ -34,7 +34,7 @@ npm run preview    # serve the production build
   - `MAPS` = `public/maps/index.json` (written by the builder: km, route polyline, street list, lights, curves, bridge/highway metres, climb, landmarks) merged with `MAP_INFO` (destination label, 2-sentence description, cheer, ending theme). Add new maps to `MAP_INFO` and to `NEW_MAPS` for the "New" badge.
   - The map-select screen groups routes by start point (`GROUPS`), draws north-up route maps as inline SVG, difficulty stars and badges from the index facts, and a detail panel with description, rush-hour race bar and online rank.
   - HUD landmark callouts come from `data.landmarks` in each map file.
-  - A dev-only hook, `window.__game`, exposes `S`, `route`, `startRace`, `finish`, `selectMap`, `selectCar`, `activatePower`, `progress` and `orbit` for automated checks.
+  - A dev-only hook, `window.__game`, exposes `S`, `route`, `world`, `startRace`, `finish`, `selectMap`, `selectCar`, `activatePower`, `progress`, `orbit` and `cam` (`{pos, look, fov}` free camera, `null` to release) for automated checks.
 - `route.js`: works in route space.
   - `s` = metres along the route; `lat` = sideways offset (+ = right). Convert with `toWorld(s, lat, h)`.
   - Models face -z, and `yaw = atan2(-tx, -tz)`.
@@ -46,7 +46,7 @@ npm run preview    # serve the production build
   - store signs (`buildSigns`): real business names on the road-facing wall plus roadside pylon signs for big lots, packed into one texture atlas
   - exit guide signs (`buildExitSigns`) from OSM ramp `destination` tags
   - trees, street lights and the finish banner
-- `landmarks.js` + `landmark-list.js` + `landmarks/<id>.js`: hand-made landmark models placed by latitude/longitude on whichever map covers them (Legislature, downtown skyline, Muttart, Hotel Macdonald, High Level Bridge, Rossdale plant, refineries, water tower, Lafarge, container yard, Snow Valley). `landmark-studio.html?id=<id>` renders one model from four angles for checking; `landmarks/_example.js` documents the module contract.
+- `landmarks.js` + `landmark-list.js` + `landmarks/<id>.js`: hand-made landmark models placed by latitude/longitude on whichever map covers them (Legislature, downtown skyline, Muttart, Hotel Macdonald, High Level Bridge, Rossdale plant, refineries, water tower, Lafarge, container yard, Snow Valley). `landmark-studio.html?id=<id>` renders one model from four angles for checking; `landmarks/_example.js` documents the module contract (`ctx.ground` follows real terrain, `ctx.onRoad` keeps props off streets). `excludeBox: [halfW, halfD, offsetE, offsetS]` in the list clears generic buildings and trees under a site.
 - `cars.js`: six team cars, each body lofted from its real dimensions.
   - The cars: Tesla Model X, Honda CR-V, Honda Accord, Lexus IS 300, Subaru Legacy, Kia Carnival.
   - Shape comes from the `side`, `plan` and `cabin` keyframes plus a per-car `section` style.

@@ -1,11 +1,11 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { LANE_W } from './route.js';
+import { STOP_BACK, stopLineExtent, lerpAt } from './lane-layout.js';
 
 const CYCLE = 24;
 const GREEN = 12;
 const YELLOW = 3;
-const STOP_BACK = 7; // stop line distance before the signal
 const CROSSWALK = [1.2, 4.2]; // zebra crossing, metres past the stop line
 
 // Black signal backplate with a yellow reflective border (as used across Alberta).
@@ -43,8 +43,12 @@ export class Signals {
     const lampGeo = new THREE.SphereGeometry(0.15, 12, 8);
 
     this.list = positions.map((s, i) => {
-      const lanes = route.lanes(s);
-      const right = route.rightEdge(s);
+      // Lanes and edges at the stop line (lane-layout.js), not at the signal: the road can
+      // change in between. One head per lane, up to 5.
+      const stop = s - STOP_BACK;
+      const [inner, outer] = stopLineExtent(route.laneData, stop);
+      const lanes = Math.max(1, Math.min(5, Math.round((outer - inner) / LANE_W)));
+      const right = lerpAt(route.laneData, route.laneData.right, s); // the pole stands at the signal
       const g = new THREE.Group();
       g.position.copy(route.toWorld(s, right + 1.3, 0));
       g.rotation.y = route.yaw(s);
@@ -60,7 +64,7 @@ export class Signals {
       const dark = [];
       const plates = [];
       const lampPos = [[], [], []];
-      for (let k = 0; k < Math.min(lanes, 4); k++) {
+      for (let k = 0; k < lanes; k++) {
         const x = -(1.3 + LANE_W * (k + 0.5));
         dark.push(plain(new THREE.BoxGeometry(0.42, 1.2, 0.3).translate(x, 6.25, 0)));
         dark.push(plain(new THREE.CylinderGeometry(0.03, 0.03, 0.3, 5).translate(x, 6.98, 0)));
@@ -97,8 +101,7 @@ export class Signals {
         if (geo.getAttribute('normal').getY(0) < 0) geo.setFromPoints([a, c, b, a, d, c]).computeVertexNormals();
         lineGeo.push(geo);
       };
-      const stop = s - STOP_BACK;
-      quad(stop - 0.25, stop + 0.25, right - lanes * LANE_W, right);
+      quad(stop - 0.25, stop + 0.25, inner, outer);
       const f = route.frame(stop);
       for (let lat = f.left + 0.4; lat < f.right - 0.3; lat += 1.1) quad(stop + CROSSWALK[0], stop + CROSSWALK[1], lat, lat + 0.55);
       this.group.add(new THREE.Mesh(mergeGeometries(lineGeo.map(plain)), lineMat));

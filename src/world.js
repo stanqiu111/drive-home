@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { Route, LANE_W } from './route.js';
+import { Route } from './route.js';
+import { markingPlan, activeSignals } from './lane-layout.js';
 import { buildLandmarks, landmarkFootprints } from './landmarks.js';
 
 const FOG_NEAR = 250;
@@ -642,37 +643,25 @@ function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads)
   return group;
 }
 
-function buildMarkings(route) {
-  const white = new MeshBuilder();
-  const yellow = new MeshBuilder();
-  const step = route.step;
+// Painted lines come only from markingPlan() in lane-layout.js (also used by
+// tools/check-roads.mjs); this just turns each line into thin quads on the road.
+function buildMarkings(route, routeData, signals) {
+  const meshes = { white: new MeshBuilder(), yellow: new MeshBuilder() };
   const H = 0.05;
-  const strip = (mb, s0, s1, lat, w) => {
-    for (let s = s0; s < s1 - 0.01; s += step) {
-      const e = Math.min(s + step, s1);
-      mb.quad(route.toWorld(s, lat - w / 2, H), route.toWorld(s, lat + w / 2, H), route.toWorld(e, lat + w / 2, H), route.toWorld(e, lat - w / 2, H));
+  for (const m of markingPlan(routeData, signals)) {
+    const mb = meshes[m.color];
+    const hw = m.width / 2;
+    for (let k = 1; k < m.pts.length; k++) {
+      const [s0, a] = m.pts[k - 1];
+      const [s1, b] = m.pts[k];
+      mb.quad(route.toWorld(s0, a - hw, H), route.toWorld(s0, a + hw, H), route.toWorld(s1, b + hw, H), route.toWorld(s1, b - hw, H));
     }
-  };
-  for (let s = 0; s < route.length - 12; s += 12) {
-    const f = route.frame(s);
-    const lanes = route.lanes(s);
-    const ourLeft = f.right - lanes * LANE_W;
-    const twoWay = f.left < ourLeft - 1;
-    for (let k = 1; k < lanes; k++) strip(white, s, s + 3, f.right - k * LANE_W, 0.15);
-    if (twoWay) {
-      const theirs = Math.round((ourLeft - f.left) / LANE_W);
-      for (let k = 1; k < theirs; k++) strip(white, s, s + 3, ourLeft - k * LANE_W, 0.15);
-      strip(yellow, s, s + 12, ourLeft - 0.12, 0.1);
-      strip(yellow, s, s + 12, ourLeft + 0.12, 0.1);
-    }
-    strip(white, s, s + 12, f.right - 0.25, 0.15);
-    strip(white, s, s + 12, f.left + 0.25, 0.15);
   }
   const mat = (color) => new THREE.MeshStandardMaterial({
     color, roughness: 0.6, emissive: color, emissiveIntensity: 0.15, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
   const group = new THREE.Group();
-  group.add(new THREE.Mesh(white.build(), mat(0xe8e8e8)), new THREE.Mesh(yellow.build(), mat(0xf2c230)));
+  group.add(new THREE.Mesh(meshes.white.build(), mat(0xe8e8e8)), new THREE.Mesh(meshes.yellow.build(), mat(0xf2c230)));
   return group;
 }
 
@@ -1628,7 +1617,7 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
   group.add(
     ...buildTerrain(data.terrain, heights, data.water),
     buildRouteRoad(route, heightAt, data.water, data.id === 'home', asphalt, data.roads),
-    buildMarkings(route),
+    buildMarkings(route, route.laneData, activeSignals(data.signals, route.length)),
     buildSideRoads(data.roads, heightAt, asphalt, route),
     buildBuildings(data.buildings, heightAt, occupancy),
     buildSigns(data.buildings, route, heightAt),

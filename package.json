@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "node tools/check-roads.mjs && vite build",
+    "check:roads": "node tools/check-roads.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

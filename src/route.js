@@ -1,6 +1,7 @@
 import * as THREE from 'three';
+import { LANE_W, drivableLanes } from './lane-layout.js';
 
-export const LANE_W = 3.5;
+export { LANE_W };
 export const MAX_LANES = 4;
 const LAT_ACCEL = 22; // m/s², how hard cars can corner
 
@@ -17,6 +18,8 @@ export class Route {
     this.lanesArr = d.lanes;
     this.rightArr = d.right;
     this.leftArr = d.left;
+    // Lane data for lane-layout.js (one-way flags, centre turn lanes), in its own shape.
+    this.laneData = { step: d.step, right: d.right, left: d.left, lanes: d.lanes, ow: d.ow, ctr: d.ctr, laneFormat: d.laneFormat };
     this.cls = d.cls;
     this.bridge = d.bridge;
     this.names = d.names;
@@ -92,8 +95,11 @@ export class Route {
     return Math.atan(this.frame(s, tmp).grade);
   }
 
+  // Lanes traffic and pickups may use at s: the lanes that fit (lane-layout.js), at most
+  // MAX_LANES. Painted lines and stop lines use the real count from lane-layout.js.
   lanes(s) {
-    return Math.max(1, Math.min(MAX_LANES, this.lanesArr[this.idx(s)]));
+    const n = this.laneData.ow ? drivableLanes(this.laneData, s) : this.lanesArr[this.idx(s)];
+    return Math.max(1, Math.min(MAX_LANES, n));
   }
 
   rightEdge(s) {

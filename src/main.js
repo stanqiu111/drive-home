@@ -4,6 +4,7 @@ import { createWorld, loadMapData } from './world.js';
 import { makeCar, spinWheels, initCarEnvironment, CAR_MODELS, CAR_IDS, PAINTS } from './cars.js';
 import { Traffic } from './traffic.js';
 import { Signals } from './signals.js';
+import { activeSignals } from './lane-layout.js';
 import { Collectibles, makeNitroCan } from './pickups.js';
 import { POWERS, randomPower, makeMysteryBox, PowerVisuals } from './powers.js';
 import { leaderboardEnabled, topScores, submitScore, allBestTimes } from './leaderboard.js';
@@ -208,7 +209,7 @@ async function selectMap(id) {
     world = createWorld(scene, data, { maxAnisotropy });
     route = world.route;
     // Skip signals in the last stretch so they don't block the ending camera.
-    signals = new Signals(scene, route, data.signals.filter((s) => s < route.length - 120));
+    signals = new Signals(scene, route, activeSignals(data.signals, route.length));
     traffic.setWorld(route, signals);
     nitroCans.setRoute(route);
     mysteryBoxes.setRoute(route);

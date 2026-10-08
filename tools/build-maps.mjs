@@ -18,6 +18,7 @@ import { fromUrl } from 'geotiff';
 import proj4 from 'proj4';
 import { createOSMStream } from 'osm-pbf-parser-node';
 import { LANDMARK_LIST } from '../src/landmark-list.js';
+import { LANE_W, LANE_FORMAT, TAPER_MAX } from '../src/lane-layout.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CACHE = path.join(ROOT, 'tools/cache');
@@ -42,7 +43,12 @@ const MAPS = [
 ];
 
 const STEP = 2; // metres between route samples
-const LANE_W = 3.5;
+// Lane layout cleaning, in route samples (2 m). See "Road lines" in CLAUDE.md.
+const LAYOUT_MIN_RUN = 40;    // 80 m: shorter lane-count changes join a neighbour
+const OW_MIN_RUN = 15;        // 30 m: shorter one-way/two-way flips are glitches
+const UNMATCHED_MIN_RUN = 15; // 30 m: longer stretches with no OSM road are unmarked lanes
+const GUESS_SEARCH = 400;     // 800 m: how far to look for a tagged way of the same street
+const BASE_WINDOW = 75;       // 150 m: one-way right edge follows the fewest lanes this near
 const BUILDING_RADIUS = 350;
 const SKYLINE_RADIUS = 2500;
 const SKYLINE_MIN_H = 35;
@@ -194,6 +200,138 @@ function smoothArr(a, k) {
     for (let j = i - kk; j <= i + kk; j++) s += a[j];
     return s / (2 * kk + 1);
   });
+}
+
+// ---------- lane layout (see "Road lines" in CLAUDE.md) ----------
+const layoutKey = (l) => `${l.ow}/${l.ours}/${l.theirs}/${l.ctr}`;
+
+function runsOf(arr, key) {
+  const runs = [];
+  for (let i = 0; i < arr.length; i++) {
+    const k = key(arr[i]);
+    const last = runs[runs.length - 1];
+    if (last && last.k === k) last.b = i;
+    else runs.push({ k, a: i, b: i });
+  }
+  return runs;
+}
+
+// Repeatedly give the shortest run under `minRun` samples the layout of a neighbour.
+// `pick(run, prev, next)` returns 'prev', 'next' or null (keep the run as it is).
+function absorbShortRuns(arr, key, minRun, pick) {
+  const kept = new Set();
+  for (;;) {
+    const runs = runsOf(arr, key);
+    let j = -1;
+    for (let k = 0; k < runs.length; k++) {
+      const len = runs[k].b - runs[k].a + 1;
+      if (len < minRun && runs.length > 1 && !kept.has(runs[k].a) && (j < 0 || len < runs[j].b - runs[j].a + 1)) j = k;
+    }
+    if (j < 0) return arr;
+    const r = runs[j];
+    const side = pick(arr, r, runs[j - 1], runs[j + 1]);
+    if (!side) { kept.add(r.a); continue; }
+    const from = side === 'prev' ? arr[runs[j - 1].b] : arr[runs[j + 1].a];
+    for (let i = r.a; i <= r.b; i++) arr[i] = { ...arr[i], ow: from.ow, ours: from.ours, theirs: from.theirs, ctr: from.ctr, guessed: from.guessed };
+  }
+}
+
+function cleanLaneLayout(raw, names) {
+  const n = raw.length;
+  // The raw layout, run-length encoded, goes into the map file so tools/check-roads.mjs can
+  // compare the cleaned result with OpenStreetMap: [sample, ow, ours, theirs, ctr, flags]
+  // with flags 1 = lane counts guessed, 2 = no OSM road matched, 4 = roundabout.
+  const flags = (l) => (l.guessed ? 1 : 0) | (l.unmatched ? 2 : 0) | (l.rb ? 4 : 0);
+  const src = runsOf(raw, (l) => `${layoutKey(l)}/${flags(l)}`).map((r) => {
+    const l = raw[r.a];
+    return [r.a, l.ow, l.ours, l.theirs, l.ctr, flags(l)];
+  });
+  const lay = raw.map((l) => ({ ...l }));
+
+  // 1. Long stretches with no OSM road (parking lots, service roads at the ends) are
+  //    unmarked two-way lanes, not a copy of the street before them.
+  for (const r of runsOf(lay, (l) => (l.unmatched ? 1 : 0))) {
+    if (r.k !== 1 || r.b - r.a + 1 < UNMATCHED_MIN_RUN) continue;
+    for (let i = r.a; i <= r.b; i++) Object.assign(lay[i], { ow: 2, ours: 1, theirs: 1, ctr: 0, guessed: false });
+  }
+  // 2. Untagged ways take the lane counts of the nearest tagged way of the same street and
+  //    kind (one-way or not), so a default never overrides real data next to it.
+  for (const r of runsOf(lay, (l) => (l.guessed ? 1 : 0))) {
+    if (r.k !== 1) continue;
+    const name = names[r.a];
+    let best = null;
+    for (let d = 1; d <= GUESS_SEARCH && !best; d++) {
+      for (const i of [r.a - d, r.b + d]) {
+        if (i < 0 || i >= n || lay[i].guessed || lay[i].ow !== lay[r.a].ow || !name || names[i] !== name) continue;
+        best = lay[i];
+        break;
+      }
+    }
+    if (best) for (let i = r.a; i <= r.b; i++) Object.assign(lay[i], { ours: best.ours, theirs: best.theirs, ctr: best.ctr, guessed: false });
+  }
+  // 3. One-way vs two-way is real geometry (a median starts or ends), so only glitches
+  //    shorter than OW_MIN_RUN are smoothed away, into the longer neighbour.
+  const kind = (l) => (l.ow === 1 ? 1 : 0);
+  absorbShortRuns(lay, kind, OW_MIN_RUN, (arr, r, prev, next) => {
+    if (!prev) return 'next';
+    if (!next) return 'prev';
+    return prev.b - prev.a >= next.b - next.a ? 'prev' : 'next';
+  });
+  // 4. Lane-count changes shorter than LAYOUT_MIN_RUN (OSM splits ways at turn bays and
+  //    intersections) join a neighbour of the same kind: never a roundabout, tagged
+  //    counts before guessed ones, then the longer. Never across a one-way/two-way change.
+  absorbShortRuns(lay, layoutKey, LAYOUT_MIN_RUN, (arr, r, prev, next) => {
+    if (arr[r.a].rb) return null;
+    const score = (q) => {
+      if (!q || kind(arr[q.a]) !== kind(arr[r.a]) || arr[q.a].ow !== arr[r.a].ow) return -1;
+      return (arr[q.a].rb ? 0 : 4e6) + (arr[q.a].guessed ? 0 : 2e6) + (q.b - q.a);
+    };
+    const sp = score(prev), sn = score(next);
+    if (sp < 0 && sn < 0) return null;
+    return sp >= sn ? 'prev' : 'next';
+  });
+  return { layout: lay, src };
+}
+
+// Road edges from the cleaned layout. Two-way roads: the middle of the road is the route
+// line. One-way carriageways: the right edge follows the through lanes (the fewest lanes
+// within 150 m), so turn bays open on the median side and the lanes we drive in stay put.
+function laneEdges(layout) {
+  const n = layout.length;
+  const R = new Array(n);
+  const L = new Array(n);
+  const owRuns = runsOf(layout, (l) => (l.ow === 1 ? 1 : 0));
+  for (const run of owRuns) {
+    for (let i = run.a; i <= run.b; i++) {
+      const l = layout[i];
+      if (l.ow !== 1) {
+        R[i] = (l.ctr / 2 + l.ours) * LANE_W;
+        L[i] = -(l.ctr / 2 + l.theirs) * LANE_W;
+        continue;
+      }
+      let base = l.ours;
+      for (let j = Math.max(run.a, i - BASE_WINDOW); j <= Math.min(run.b, i + BASE_WINDOW); j++) base = Math.min(base, layout[j].ours);
+      R[i] = (base * LANE_W) / 2;
+      L[i] = R[i] - l.ours * LANE_W;
+    }
+  }
+  // Tapers: ~40 m across a lane change, ~100 m where a median starts or ends.
+  const nearOw = new Float32Array(n);
+  for (let k = 1; k < owRuns.length; k++) {
+    const c = owRuns[k].a;
+    for (let i = Math.max(0, c - 45); i < Math.min(n, c + 45); i++) nearOw[i] = Math.max(nearOw[i], Math.min(1, (45 - Math.abs(i - c)) / 15));
+  }
+  const taper = (a) => {
+    const short = smoothArr(a, 10);
+    const long = smoothArr(a, 25);
+    const sm = short.map((v, i) => v + (long[i] - v) * nearOw[i]);
+    const fwd = sm.slice();
+    const bwd = sm.slice();
+    for (let i = 1; i < n; i++) fwd[i] = Math.max(fwd[i - 1] - TAPER_MAX, Math.min(fwd[i - 1] + TAPER_MAX, fwd[i]));
+    for (let i = n - 2; i >= 0; i--) bwd[i] = Math.max(bwd[i + 1] - TAPER_MAX, Math.min(bwd[i + 1] + TAPER_MAX, bwd[i]));
+    return sm.map((_, i) => (fwd[i] + bwd[i]) / 2);
+  };
+  return { right: taper(R), left: taper(L) };
 }
 
 function medianArr(a, k) {
@@ -559,29 +697,41 @@ function roadClass(hw) {
   return 0;
 }
 
+// Lane layout of an OSM way in our direction of travel. `guessed` = no lane tags, so the
+// counts are class defaults; `ctr` = lanes in the middle of a two-way road that belong to
+// neither direction (a centre two-way turn lane).
 function laneInfo(t, forward) {
   const hw = t.highway;
+  const roundabout = t.junction === 'roundabout' || t.junction === 'circular';
   const oneway = t.oneway === 'yes' || t.oneway === '1' || t.oneway === 'true' || t.oneway === '-1'
-    || t.junction === 'roundabout' || ((hw === 'motorway' || hw === 'motorway_link') && t.oneway !== 'no');
+    || roundabout || ((hw === 'motorway' || hw === 'motorway_link') && t.oneway !== 'no');
   const total = parseInt(t.lanes, 10);
   if (oneway) {
     const l = total > 0 ? total : /link/.test(hw) ? 1 : roadClass(hw) >= 2 ? 2 : 1;
-    return { oneway, ours: l, theirs: 0 };
+    return { oneway, ours: l, theirs: 0, ctr: 0, guessed: !(total > 0), roundabout };
   }
   const fwd = parseInt(t['lanes:forward'], 10);
   const bwd = parseInt(t['lanes:backward'], 10);
+  if (fwd > 0 && bwd > 0) {
+    const ctr = total > fwd + bwd ? 1 : 0;
+    return { oneway, ours: forward ? fwd : bwd, theirs: forward ? bwd : fwd, ctr, guessed: false, roundabout };
+  }
   const dflt = roadClass(hw) >= 2 ? 4 : 2;
-  const tot = total > 0 ? total : (fwd > 0 && bwd > 0 ? fwd + bwd : dflt);
+  const tot = total > 0 ? total : dflt;
   let ours = forward ? fwd : bwd;
   if (!(ours > 0)) ours = Math.max(1, Math.floor(tot / 2));
-  return { oneway, ours, theirs: Math.max(1, tot - ours) };
+  return { oneway, ours, theirs: Math.max(1, tot - ours), ctr: 0, guessed: !(total > 0), roundabout };
 }
 
+// Width of a side road (drawn from OSM, not driven): one-way ways without a lanes tag are
+// two lanes (links one), not the two-way class width, so the other half of a divided road
+// isn't drawn over ours.
 function roadWidth(t) {
   const lanes = parseInt(t.lanes, 10);
   if (lanes > 0) return lanes * 3.4;
   const hw = t.highway;
   if (/link/.test(hw)) return 5;
+  if (t.oneway === 'yes' || t.oneway === '-1' || t.junction === 'roundabout') return (roadClass(hw) >= 2 ? 2 : 1) * 3.4;
   if (hw === 'motorway' || hw === 'trunk') return 8;
   if (hw === 'primary' || hw === 'secondary') return 13;
   if (hw === 'tertiary') return 10;
@@ -667,38 +817,35 @@ async function buildMap(m, ptsGlobal, osm) {
       }
     }
   }
-  // Fill gaps (intersections, link roads) from the nearest matched neighbour.
+  // Fill gaps (intersections, link roads) from the nearest matched neighbour; remember which
+  // samples really matched an OSM road (long gaps are parking lots and service roads).
+  const matched = match.map(Boolean);
   let lastMatch = match.find(Boolean);
   for (let i = 0; i < N; i++) {
     if (match[i]) lastMatch = match[i]; else match[i] = lastMatch;
   }
   log(`  route: ${N} samples, ${(N * STEP / 1000).toFixed(1)} km`);
 
-  // Lanes, edges, class, bridge and names along the route.
-  let lanes = [];
-  let right = [];
-  let left = [];
+  // Lanes, edges, class, bridge and names along the route. See "Road lines" in CLAUDE.md:
+  // the lane layout is cleaned as one unit, the raw layout is kept for the checker, and
+  // the renderer never guesses.
+  const raw = [];
   const cls = [];
   const bridge = [];
   const names = [];
   for (let i = 0; i < N; i++) {
     const t = roads[match[i].ri].t;
     const li = laneInfo(t, match[i].forward);
-    lanes.push(li.ours);
-    if (li.oneway) {
-      right.push((li.ours * LANE_W) / 2);
-      left.push((-li.ours * LANE_W) / 2);
-    } else {
-      right.push(li.ours * LANE_W);
-      left.push(-li.theirs * LANE_W);
-    }
+    raw.push({ ow: li.oneway ? 1 : 0, ours: li.ours, theirs: li.oneway ? 0 : li.theirs, ctr: li.ctr, guessed: li.guessed, rb: li.roundabout, unmatched: !matched[i] });
     cls.push(roadClass(t.highway));
     bridge.push(t.bridge && t.bridge !== 'no' ? 1 : 0);
     names.push(t.name || t.ref || '');
   }
-  lanes = medianArr(lanes, 15);
-  right = smoothArr(medianArr(right, 15), 10);
-  left = smoothArr(medianArr(left, 15), 10);
+  const { layout, src } = cleanLaneLayout(raw, names);
+  const ow = layout.map((l) => l.ow);
+  const lanes = layout.map((l) => l.ours);
+  const ctr = layout.map((l) => l.ctr);
+  const { right, left } = laneEdges(layout);
   // Ignore tiny bridge blips (culverts mapped as bridges are fine, but single-sample noise is not).
   const bridgeClean = medianArr(bridge, 3);
 
@@ -1047,6 +1194,10 @@ async function buildMap(m, ptsGlobal, osm) {
       lanes,
       right: right.map(r1),
       left: left.map(r1),
+      laneFormat: LANE_FORMAT,
+      ow,
+      ...(ctr.some(Boolean) ? { ctr } : {}),
+      src,
       cls,
       bridge: bridgeClean,
       names: nameRuns,

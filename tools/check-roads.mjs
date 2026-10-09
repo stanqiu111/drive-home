@@ -161,7 +161,119 @@ function checkMap(id) {
     if (a < at(rd.left, s) - 0.05 || b > at(rd.right, s) + 0.05 || b - a < LANE_W * 0.7) bad('stop-line', s, `stop line [${a.toFixed(2)}, ${b.toFixed(2)}] vs road [${at(rd.left, s).toFixed(2)}, ${at(rd.right, s).toFixed(2)}]`);
     if (!inBox(s + 1)) bad('stop-line', s, 'lines are not broken at this intersection');
   }
+  checkStructures(data, rd, bad);
   return { id, problems, lines: plan.length };
+}
+
+// Road structures (see "Road structures" in CLAUDE.md): nothing raised by the builder may
+// stand on the driven road, piers stay off every road, and humps are single smooth rises.
+const HUMP_RADIUS = 400;  // m, as in tools/build-maps.mjs
+const HUMP_MAX = 9;
+const CLEAR_MIN = 5.0;    // m: anything raised over the route must clear its surface by this
+function checkStructures(data, rd, bad) {
+  const { step } = rd;
+  const n = rd.x.length;
+  const tx = new Float64Array(n);
+  const tz = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i - 2);
+    const b = Math.min(n - 1, i + 2);
+    const l = Math.hypot(rd.x[b] - rd.x[a], rd.z[b] - rd.z[a]) || 1;
+    tx[i] = (rd.x[b] - rd.x[a]) / l;
+    tz[i] = (rd.z[b] - rd.z[a]) / l;
+  }
+  const CELL = 25;
+  const grid = new Map();
+  for (let i = 0; i < n; i++) {
+    const k = `${Math.floor(rd.x[i] / CELL)},${Math.floor(rd.z[i] / CELL)}`;
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(i);
+  }
+  const nearest = (x, z) => {
+    const cx = Math.floor(x / CELL);
+    const cz = Math.floor(z / CELL);
+    let best = -1;
+    let bd = 60;
+    for (let a = -3; a <= 3; a++) for (let b = -3; b <= 3; b++) {
+      for (const i of grid.get(`${cx + a},${cz + b}`) ?? []) {
+        const d = Math.hypot(rd.x[i] - x, rd.z[i] - z);
+        if (d < bd) { bd = d; best = i; }
+      }
+    }
+    return best;
+  };
+  const halfW = (i) => Math.max(rd.right[i], -rd.left[i]);
+  const lat = (i, x, z) => (x - rd.x[i]) * -tz[i] + (z - rd.z[i]) * tx[i];
+  const onRoute = (x, z, pad) => {
+    const i = nearest(x, z);
+    if (i < 0) return -1;
+    const along = (x - rd.x[i]) * tx[i] + (z - rd.z[i]) * tz[i];
+    return Math.abs(lat(i, x, z)) < halfW(i) + pad && Math.abs(along) < step * 2 ? i : -1;
+  };
+
+  // Humps: each raised stretch rises once, stays level, falls once; gentle crests; bounded.
+  const lift = rd.lift;
+  if (lift) {
+    let i = 0;
+    while (i < n) {
+      if (lift[i] <= 0) { i++; continue; }
+      let j = i;
+      while (j < n && lift[j] > 0) j++;
+      let peak = i;
+      for (let k = i; k < j; k++) if (lift[k] > lift[peak]) peak = k;
+      if (lift[peak] > HUMP_MAX) bad('hump', peak * step, `lifted ${lift[peak]} m, more than ${HUMP_MAX} m`);
+      for (let k = i + 1; k < j; k++) {
+        const up = lift[k] - lift[k - 1];
+        if ((k <= peak && up < -0.15) || (k > peak && up > 0.15)) { bad('hump', k * step, 'the road dips between two raised decks (camel back)'); break; }
+      }
+      for (let k = Math.max(i, 5); k < Math.min(j, n - 5); k++) {
+        const curv = Math.abs(lift[k + 5] - 2 * lift[k] + lift[k - 5]) / (5 * step) ** 2;
+        if (curv > 1.25 / HUMP_RADIUS + 0.2 / (5 * step) ** 2) { bad('hump', k * step, `crest/dip radius ${(1 / curv).toFixed(0)} m on a hump ramp`); break; }
+      }
+      i = j;
+    }
+  }
+
+  // Side roads with builder-given heights: on the route they must be at grade or clear it.
+  const roads = data.roads ?? [];
+  for (const r of roads) {
+    if (!r.h) continue;
+    const q = [];
+    for (let k = 0; k < r.p.length; k += 2) q.push([r.p[k] / 10, r.p[k + 1] / 10]);
+    for (let k = 0; k < q.length - 1; k++) {
+      const len = Math.hypot(q[k + 1][0] - q[k][0], q[k + 1][1] - q[k][1]);
+      const m = Math.max(1, Math.ceil(len / 1.5));
+      for (let u = 0; u <= m; u++) {
+        const t = u / m;
+        const x = q[k][0] + (q[k + 1][0] - q[k][0]) * t;
+        const z = q[k][1] + (q[k + 1][1] - q[k][1]) * t;
+        const i = onRoute(x, z, 0.5);
+        if (i < 0) continue;
+        const h = r.h[k] + (r.h[k + 1] - r.h[k]) * t;
+        const above = h - rd.y[i];
+        if (above > 0.4 && above < CLEAR_MIN) {
+          bad('on-road', i * step, `${r.o ? 'overpass deck' : 'raised side road'} only ${above.toFixed(1)} m above the route`);
+          u = m; k = q.length;
+        }
+      }
+    }
+  }
+  // Piers: never on the route or on another road.
+  for (const [px, pz, , , nx, nz, w] of data.piers ?? []) {
+    const foot = [-1, -0.5, 0, 0.5, 1].map((f) => [px + nx * w * f, pz + nz * w * f]);
+    const i = foot.map(([x, z]) => onRoute(x, z, 0.5)).find((v) => v >= 0);
+    if (i != null) bad('pier', i * step, `overpass pier stands on the route at (${px}, ${pz})`);
+    for (const [x, z] of foot) for (const r of roads) {
+      if (r.o) continue;
+      for (let k = 2; k < r.p.length; k += 2) {
+        const ax = r.p[k - 2] / 10, az = r.p[k - 1] / 10, bx = r.p[k] / 10, bz = r.p[k + 1] / 10;
+        if (Math.min(ax, bx) > x + 40 || Math.max(ax, bx) < x - 40 || Math.min(az, bz) > z + 40 || Math.max(az, bz) < z - 40) continue;
+        const dx = bx - ax, dz = bz - az, l2 = dx * dx + dz * dz || 1;
+        const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / l2));
+        if (Math.hypot(x - ax - dx * t, z - az - dz * t) < r.w / 2 + 0.3) { bad('pier', 0, `overpass pier stands on a side road at (${x}, ${z})`); k = r.p.length; }
+      }
+    }
+  }
 }
 
 let failed = 0;

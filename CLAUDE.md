@@ -43,12 +43,12 @@ npm run preview    # serve the production build
 - `world.js`: builds a map from its JSON:
   - terrain (carved under the road) and water
   - the road, curbs and sidewalks (broken at side streets), bridges (Walterdale arches on `home`) and lane markings
-  - side streets that ramp into junctions; side streets tagged as bridges over level ground become overpasses with ramps and piers
+  - side streets that ramp into junctions; raised side roads (overpass decks, their ramps, the other half of a divided road beside a hump) and piers are drawn from heights the builder writes (see "Road structures")
   - buildings: each has a class (`c`: house, rowhouse, apartments, retail, industrial, office, civic, outbuilding, hotel, parking, church, school, bigbox) and `wallStyle()` picks the texture: house siding, stucco with balconies, brick (schools, civic, heritage zones), tilt-up panels for big boxes, ribbed metal for warehouses, glass towers, concrete slab towers, parkades; hip roofs on houses, parapets and rooftop units on flat roofs; `BRANDS` colours known chains
   - store signs (`buildSigns`): real business names on the road-facing wall plus roadside pylon signs for big lots, packed into one texture atlas
   - exit guide signs (`buildExitSigns`) from OSM ramp `destination` tags
   - trees, street lights and the finish banner
-- `landmarks.js` + `landmark-list.js` + `landmarks/<id>.js`: hand-made landmark models placed by latitude/longitude on whichever map covers them (Legislature, downtown skyline, Muttart, Hotel Macdonald, High Level Bridge, Rossdale plant, refineries, water tower, Lafarge, container yard, Snow Valley). `landmark-studio.html?id=<id>` renders one model from four angles for checking; `landmarks/_example.js` documents the module contract (`ctx.ground` follows real terrain, `ctx.onRoad` keeps props off streets). `excludeBox: [halfW, halfD, offsetE, offsetS]` in the list clears generic buildings and trees under a site.
+- `landmarks.js` + `landmark-list.js` + `landmarks/<id>.js`: hand-made landmark models placed by latitude/longitude on whichever map covers them (Legislature, downtown skyline, Muttart, Hotel Macdonald, High Level Bridge, Rossdale plant, refineries, water tower, Lafarge, container yard, Snow Valley). `landmark-studio.html?id=<id>` renders one model from four angles for checking; `landmarks/_example.js` documents the module contract (`ctx.ground` follows real terrain, `ctx.onRoad` keeps props off streets, `ctx.route` describes the driven road so models keep clear of it). In dev, a warning lists any landmark standing on the driven road; it must stay silent. `excludeBox: [halfW, halfD, offsetE, offsetS]` in the list clears generic buildings and trees under a site.
 - `cars.js`: six team cars, each body lofted from its real dimensions.
   - The cars: Tesla Model X, Honda CR-V, Honda Accord, Lexus IS 300, Subaru Legacy, Kia Carnival.
   - Shape comes from the `side`, `plan` and `cabin` keyframes plus a per-car `section` style.
@@ -75,7 +75,7 @@ npm run preview    # serve the production build
   - terrain from NRCan MRDEM-30
 - It needs `tools/cache/alberta-latest.osm.pbf` (about 350 MB), from https://download.geofabrik.de/north-america/canada/alberta-latest.osm.pbf. `tools/cache/` is gitignored; the other downloads cache there automatically.
 - `tools/cache/` is not in git; on a new computer it starts empty. The builder re-downloads routes, buildings, zoning and terrain by itself. The 350 MB `.pbf` is only read once to make `osm-corridor.json`, so it's needed only when that file is missing or must be re-extracted, for example after adding tags to `WAY_KEYS` such as `railway` for the hump fix. Download it by hand from the link above. A fresh download has newer OpenStreetMap data, so rebuilt maps may differ slightly.
-- Maps can have their own `start` (lon/lat) and `from` label; the two downtown maps start on 107 St by the Legislature (a public street). The route's elevation gets a 6.5 m hump where it crosses another road on a bridge over level ground (the DEM shows no structures).
+- Maps can have their own `start` (lon/lat) and `from` label; the two downtown maps start on 107 St by the Legislature (a public street). Raised structures are decided here (see "Road structures"). Railways come from a separate one-time pass over the `.pbf` (`tools/cache/osm-rail.json`).
 - Building classes come from OSM tags, then City of Edmonton zoning polygons (`fixa-tstc`, cached per map), then OSM land use, then size. Footprints under a landmark's `excludeR` are dropped. Named buildings keep their OSM name (`n`) for signs.
 - **Adding a map:** add it to `MAPS` in `tools/build-maps.mjs` and to `MAP_INFO` in `src/main.js`, rebuild, then add its id to BOTH `map in (...)` checks in `supabase/schema.sql` and re-run the SQL; otherwise posting times on that map fails.
 - **Adding a landmark:** add an entry to `src/landmark-list.js`, write `src/landmarks/<id>.js`, check it with `landmark-studio.html`, then rebuild the maps so footprints under it are dropped and the route callout is written.
@@ -90,6 +90,22 @@ Lane lines were wrong from the first version on: short double-yellow lines poppe
 - **No caps, no blocks.** Don't cap lane counts when drawing lines; `route.lanes()` caps at 4 only for traffic and pickups. Take sideways offsets at every route sample, never once per block.
 - **The check.** `npm run build` runs `npm run check:roads` first and stops on any failure, so Vercel won't deploy broken lines. The check compares against the raw OSM layout in `route.src`, not just against the cleaned data, so a cleaning mistake fails. Run it after touching the builder, `public/maps/*.json`, `route.js`, `lane-layout.js`, `signals.js` or the road code in `world.js`. After changing lane logic, rebuild ALL maps (old map files draw no lines). Don't loosen its limits to make it pass; fix the data or the plan.
 - The check covers geometry, not looks. After road changes, also screenshot a few lane-count changes, two-way stretches and signals in the game.
+
+## Road structures (rule: nothing raised on the driven road)
+
+The DEM is bare earth, so bridges and overpasses have to be made up. On 2026-10-07 the game started lifting side bridges +6.5 m with 70 m straight ramps and piers, and the builder added +6.5 m humps to every short route bridge. Neither checked where things landed, so ramps, embankments and piers ended up across the lanes, and humps stacked into camel backs or rose over creeks. Fixed 2026-10-09. To keep it fixed:
+
+- **The builder decides, the game draws.** `tools/build-maps.mjs` makes every raised structure:
+  - **Route humps:** only where a road or railway really crosses under the route bridge. Lift only as much as `HUMP_CLEAR` needs. Ramps keep a 6% grade and a crest radius of at least `HUMP_RADIUS`. Neighbouring humps merge instead of adding. The lift goes into `route.lift`.
+  - **`sideRoadStructures()`:** a side bridge that crosses OVER the route gets a deck `OVERPASS_CLEAR` above it (`o: 1`). The road pieces joined to its ends ramp down (`e: 1`) and are never raised inside the route corridor. Piers (`piers`) never stand on the route or any road. The other half of a divided road beside a hump rides level with us (`e: 1`). Side roads that meet a raised hump ramp stop at the embankment foot.
+  - Raised pieces carry `h`, a height per point, and `world.js` just draws it; `junctionBlend` never drags a side road up a hump ramp.
+- **Landmarks** use `ctx.route` to keep clear of the driven road (the High Level Bridge is fitted to it and drops steel that would stand in the lanes). The dev warning must stay silent on every map.
+- **The check.** `tools/check-roads.mjs` (run by `npm run build`) also fails on:
+  - a raised side road or deck less than 5 m above the route where it is on the route;
+  - a pier on any road;
+  - a hump that dips between decks;
+  - a hump steeper than its limits or higher than `HUMP_MAX`.
+- After changing structures, screenshot the overpasses and humps from the driver's view.
 
 ## Database (Supabase free tier)
 
@@ -113,7 +129,7 @@ The owner switched computers mid-task. This section is the compressed history an
 ### Where things are
 
 - **Live** (`main`, last deploy `dcaca2c`): 8 maps, landmarks, the map-select screen, building styles, store and exit signs, overpasses, online leaderboard and achievements.
-- **Branch `wip/road-lines-and-sound`** (not live, waiting for the owner's OK). It holds the road-line fix, the line check in `npm run build`, these notes and `tools/dev/shots.mjs`. To go live once the owner approves: merge into `main` and push.
+- **Branch `wip/road-lines-and-sound`** (not live, waiting for the owner's OK). It holds the road-line fix, the road-structure fix (2026-10-09), the check in `npm run build`, these notes and `tools/dev/shots.mjs`. To go live once the owner approves: merge into `main` and push.
 
 ### Owner to-dos
 
@@ -122,17 +138,9 @@ The owner switched computers mid-task. This section is the compressed history an
 
 ### Unfinished work, in order
 
-1. **Things on the driven road (bugs from the 2026-10-07 overpass and hump work).** The 2026-10-05 smooth-road fix still holds: terrain never pokes through the road. But a road audit on 2026-10-08 found new problems. Fix the root causes and add a check to `npm run build` so they can't return:
-   - **Side-road overpasses** (`buildSideRoads` in `world.js`).
-     - What it does now: every short side bridge near level ground is lifted 6.5 m above its own ends. It gets 70 m straight ramps, embankments and piers every 25 m, and nothing checks where these land.
-     - Where it goes wrong: earth ramps or embankments across the lanes on home/noodle at s 2924–2972 (Gateway at the Henday) and s 5198–5210 / 5288–5300 (23 Ave); sherwood s 12809–12822; snowvalley s 470–510; refinery s 1690–1762 (its deck is only 3.5 m up at s 1760). Piers stand in lanes on home/noodle at s 3453 and s 4756, and on sherwood at s 9067, 9078 and 11197. A deck sits only 2.5 m above the road on snowvalley at s 9362.
-     - The plan: only lift side bridges that actually cross over the route. Put the deck at route height plus 5.5 m clearance. End ramps before the road, and never put piers on a road. Put these decisions in a pure module the Node check can test, the way `lane-layout.js` is used.
-   - **Route humps** (`tools/build-maps.mjs`, "Overpasses: a bridge run…").
-     - Problems: two humps 64 m apart add up into a camel back on refinery at s 8780–8952. Humps over creeks with nothing underneath on windermere at s 2454–2532 and 6984–7030. A deck 11 m up on windermere at s 2034–2166, and sharp crests at the ramp ends.
-     - Also, side roads that join on a hump ramp get dragged 5–6 m up (windermere s 2009 and 2185; snowvalley s 8100 and 8203).
-     - The plan: hump only where a road or railway passes underneath. Lift only as much as clearance needs, take the larger of overlapping lifts instead of adding them, use gentle ramps, and leave side roads at ground level.
-   - **High Level Bridge model** (`landmarks/highlevel.js`, snowvalley). It's a straight truss and the route curves in and out of it. Truss posts stand in the lanes at s 1041–1045 and 1728–1739, and members hang 2.7–4.2 m over the road. Its own deck sits 0.2 m above the game road at s 1144–1316, which hides the lane lines. The plan: give landmark modules the route (a `ctx.route(x, z)` helper), keep a clear box over the road, and add a dev warning when any landmark intrudes on the road.
-   - **Older, cosmetic:** sidewalk folds over the lanes on the 5 m turn near the sherwood finish (s 22064–22194). Side roads clip the underside of real bridges (home s 8174–8231; refinery s 1359–1810 and 11350–11424).
+1. **Things on the driven road:** done 2026-10-09 (see "Road structures"). Left, cosmetic:
+   - Sidewalk folds over the lanes on the ~5 m turn near the sherwood finish (s 22064–22194). The route itself turns that sharply; smoothing very sharp corners in the builder would fix it.
+   - Side roads clip the underside of some real road bridges (home s 8174–8231; refinery s 1359–1810 and 11350–11424). Off the driven road.
 2. **Sound effects** (owner asked 2026-10-08; nothing built yet). Build them procedurally with Web Audio in `src/sound.js`: no files, no network.
    - Engine per vehicle with gear shifts: Subaru boxer rumble, Kia van, electric whine for the Model X and Cam's E-bike, freewheel ticking for the Bicycle, a Rocket roar that grows at lift-off, playful sounds for the fun rides.
    - Effects: nitro whoosh, tyre squeal, wind, strength-aware crash, a different smash for the Rocket/shield, chimes for nitro cans and ? boxes plus a stinger per power, 3-2-1-GO, finish fanfare, achievement chime, pass-by whoosh, soft UI clicks.

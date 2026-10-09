@@ -41,7 +41,7 @@ function materialFor(color, finish = 'matte', extra = {}) {
 // All landmark modules, discovered at build time.
 const modules = import.meta.glob('./landmarks/*.js', { eager: true });
 
-export function landmarkContext(entry, ground = () => null, onRoad = () => false) {
+export function landmarkContext(entry, ground = () => null, onRoad = () => false, route = () => null) {
   return {
     mat: materialFor,
     entry,
@@ -53,6 +53,11 @@ export function landmarkContext(entry, ground = () => null, onRoad = () => false
     // True when model-local (x, z) is on or right beside a road (always false in the studio);
     // use it to keep trees and props off the streets around a landmark.
     onRoad,
+    // The driven road nearest to model-local (x, z): { s, lat, left, right, y } with lat =
+    // metres right of the route line, left/right = its edges, y = road surface relative to
+    // the model origin; null away from the route and in the studio. Use it to keep clear of
+    // the road (see "Road structures" in CLAUDE.md).
+    route,
   };
 }
 
@@ -76,9 +81,11 @@ export function landmarkFootprints(data) {
 }
 
 // Place every landmark that falls on this map. `heightAt(x, z)` gives ground height or null;
-// `onRoad(x, z)` says whether a map point is on a road.
-export function buildLandmarks(data, heightAt, onRoad = () => false) {
+// `onRoad(x, z)` says whether a map point is on a road; `routeAt(x, z)` describes the driven
+// road nearest a map point (see landmarkContext).
+export function buildLandmarks(data, heightAt, onRoad = () => false, routeAt = () => null) {
   const group = new THREE.Group();
+  group.userData.intrusions = [];
   for (const L of LANDMARK_LIST) {
     const mod = modules[`./landmarks/${L.id}.js`];
     if (!mod?.build) continue;
@@ -91,11 +98,64 @@ export function buildLandmarks(data, heightAt, onRoad = () => false) {
       const h = heightAt(...toMap(lx, lz));
       return h == null ? null : h - base;
     };
-    const model = mod.build(landmarkContext(L, ground, (lx, lz) => onRoad(...toMap(lx, lz))));
+    const route = (lx, lz) => {
+      const r = routeAt(...toMap(lx, lz));
+      return r && { ...r, y: r.y - base };
+    };
+    const model = mod.build(landmarkContext(L, ground, (lx, lz) => onRoad(...toMap(lx, lz)), route));
     model.position.set(x, base, z);
     model.rotation.y = a;
     model.name = `landmark:${L.id}`;
     group.add(model);
+    if (import.meta.env?.DEV) {
+      const hits = roadIntrusions(model, routeAt);
+      if (hits.length) {
+        group.userData.intrusions.push({ id: L.id, hits });
+        console.warn(`Landmark ${L.id} stands on the driven road at s=${hits.slice(0, 5).map((h) => Math.round(h.s)).join(', ')}${hits.length > 5 ? '…' : ''} (${hits.length} points)`);
+      }
+    }
   }
   return group;
+}
+
+// Dev check: points of a placed model (vertices and triangle centres) that are on the
+// driven road, from just below its surface up to 4.5 m above it.
+// Vertices, edge points and centres of each triangle (long thin parts have few vertices).
+const SAMPLE_WEIGHTS = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [1 / 3, 1 / 3, 1 / 3]];
+for (const f of [0.25, 0.5, 0.75]) SAMPLE_WEIGHTS.push([f, 1 - f, 0], [0, f, 1 - f], [1 - f, 0, f]);
+function roadIntrusions(model, routeAt) {
+  const hits = [];
+  const p = new THREE.Vector3();
+  const test = () => {
+    const r = routeAt(p.x, p.z);
+    // Inside the road edges and from just above the surface (kerbs and lawns flush with the
+    // road are fine) to 4.5 m up, where a car or the chase camera would hit it.
+    if (!r || p.y < r.y + 0.05 || p.y > r.y + 4.5) return;
+    if (r.lat > r.left - 0.1 && r.lat < r.right + 0.1) hits.push({ s: r.s, lat: r.lat, h: p.y - r.y });
+  };
+  model.updateMatrixWorld(true);
+  model.traverse((o) => {
+    if (!o.isMesh || hits.length > 200) return;
+    const pos = o.geometry.attributes.position;
+    const m = new THREE.Matrix4();
+    const instances = o.isInstancedMesh ? o.count : 1;
+    for (let k = 0; k < instances; k++) {
+      if (o.isInstancedMesh) { o.getMatrixAt(k, m); m.premultiply(o.matrixWorld); } else m.copy(o.matrixWorld);
+      const idx = o.geometry.index;
+      const tri = idx ? idx.count / 3 : pos.count / 3;
+      const v = (j) => (idx ? idx.getX(j) : j);
+      for (let t = 0; t < tri; t++) {
+        for (const w of SAMPLE_WEIGHTS) {
+          p.set(0, 0, 0);
+          for (let q = 0; q < 3; q++) {
+            const j = v(t * 3 + q);
+            p.x += pos.getX(j) * w[q]; p.y += pos.getY(j) * w[q]; p.z += pos.getZ(j) * w[q];
+          }
+          p.applyMatrix4(m);
+          test();
+        }
+      }
+    }
+  });
+  return hits;
 }

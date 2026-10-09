@@ -455,6 +455,20 @@ function routeLookup(route) {
   };
 }
 
+// The driven road nearest a map point: { s, lat, left, right, y } (lat = metres right of the
+// route line), or null more than 80 m from the route. Used by landmark models.
+function routeAtFor(route) {
+  const nearest = routeLookup(route);
+  return (x, z) => {
+    const nr = nearest(x, z, 80);
+    if (!nr) return null;
+    const f0 = route.frame(nr.i * route.step);
+    const s = Math.max(0, Math.min(route.length, nr.i * route.step + (x - f0.x) * f0.tx + (z - f0.z) * f0.tz));
+    const f = route.frame(s);
+    return { s, lat: -(x - f.x) * f.tz + (z - f.z) * f.tx, left: f.left, right: f.right, y: f.y };
+  };
+}
+
 // ---------- the route road ----------
 // Spatial index of side-street centrelines, to find where they meet the route.
 function sideStreetIndex(roads) {
@@ -691,13 +705,33 @@ function junctionBlend(route) {
         }
       }
     }
-    if (best < 0 || route.bridge[best]) return y;
+    // No blending on bridges or raised hump ramps: side roads there stay at their own level.
+    if (best < 0 || route.bridge[best] || (route.liftArr && route.liftArr[best] > 0.5)) return y;
     const edge = Math.max(-route.leftArr[best], route.rightArr[best]);
     const w = 1 - Math.min(1, Math.max(0, (Math.sqrt(bd) - edge) / RAMP));
     const target = route.y[best] - 0.03;
     if (w <= 0 || Math.abs(target - y) > 4) return y;
     return y + (target - y) * w;
   };
+}
+
+// Overpass piers, placed by the map builder off every road: [x, z, top, bottom, nx, nz, halfWidth]
+// with (nx, nz) pointing across the deck.
+function buildPiers(piers = []) {
+  const mb = new MeshBuilder();
+  for (const [x, z, top, bot, nx, nz, w] of piers) {
+    const ax = nx * w;
+    const az = nz * w;
+    const tx = -nz * 0.6;
+    const tz = nx * 0.6;
+    const c = [[x - ax - tx, z - az - tz], [x + ax - tx, z + az - tz], [x + ax + tx, z + az + tz], [x - ax + tx, z - az + tz]];
+    for (let q = 0; q < 4; q++) {
+      const p1 = c[q];
+      const p2 = c[(q + 1) % 4];
+      mb.quad(new THREE.Vector3(p1[0], bot, p1[1]), new THREE.Vector3(p2[0], bot, p2[1]), new THREE.Vector3(p2[0], top, p2[1]), new THREE.Vector3(p1[0], top, p1[1]));
+    }
+  }
+  return new THREE.Mesh(mb.build(), new THREE.MeshStandardMaterial({ color: 0xa9a59c, side: THREE.DoubleSide }));
 }
 
 function buildSideRoads(roads, heightAt, asphalt, route) {
@@ -722,84 +756,45 @@ function buildSideRoads(roads, heightAt, asphalt, route) {
       total += Math.hypot(pts[k][0] - pts[k - 1][0], pts[k][1] - pts[k - 1][1]);
       acc.push(total);
     }
-    let ys = pts.map(([x, z], k) => {
+    // Heights. The map builder decides every raised road (see "Road structures" in CLAUDE.md):
+    // `h` gives the height of each point for overpass decks (`o`), their ramps and roads on
+    // embankments (`e`). Other bridges are a straight deck between their ends; everything
+    // else follows the ground and blends into junctions.
+    const rawAcc = [0];
+    for (let k = 1; k < raw.length; k++) rawAcc.push(rawAcc[k - 1] + Math.hypot(raw[k][0] - raw[k - 1][0], raw[k][1] - raw[k - 1][1]));
+    const givenAt = (d) => {
+      let k = 0;
+      while (k < rawAcc.length - 2 && rawAcc[k + 1] < d) k++;
+      const t = (d - rawAcc[k]) / ((rawAcc[k + 1] - rawAcc[k]) || 1);
+      return r.h[k] + (r.h[k + 1] - r.h[k]) * Math.max(0, Math.min(1, t));
+    };
+    const ys = pts.map(([x, z], k) => {
+      if (r.h) return givenAt(acc[k]);
       if (r.b && r.y) return r.y[0] + (r.y[1] - r.y[0]) * (acc[k] / (total || 1)) + 0.4;
       const g = heightAt(x, z);
       return g == null ? null : blend(x, z, g + 0.08);
     });
-    // An overpass: a bridge whose ground stays level is a road crossing another road.
-    // Lift its deck 6.5 m and add earth ramps beyond both ends so it doesn't float.
-    let overpass = false;
-    if (r.b && r.y && (r.l ?? 0) >= 1) {
-      let minG = Infinity;
-      for (const [x, z] of pts) { const g = heightAt(x, z); if (g != null) minG = Math.min(minG, g); }
-      if (Math.max(r.y[0], r.y[1]) - minG < 6 && total < 400) {
-        overpass = true;
-        ys = ys.map((y) => (y == null ? null : y + 6.5));
-      }
-    }
     const hw = r.w / 2;
-    if (overpass) {
-      const RAMP = 70;
-      const ramp = (from, dirX, dirZ, yTop) => {
-        // Sloped road surface and skirt from the deck end down to the ground.
-        const steps = 6;
-        let prev = { x: from[0], z: from[1], y: yTop };
-        for (let k = 1; k <= steps; k++) {
-          const d = (RAMP * k) / steps;
-          const x = from[0] + dirX * d;
-          const z = from[1] + dirZ * d;
-          const g = heightAt(x, z);
-          if (g == null) break;
-          const t = k / steps;
-          const y = yTop + (g + 0.08 - yTop) * (t * t * (3 - 2 * t));
-          const nx = -dirZ * hw;
-          const nz = dirX * hw;
-          const a = new THREE.Vector3(prev.x + nx, prev.y, prev.z + nz);
-          const b = new THREE.Vector3(prev.x - nx, prev.y, prev.z - nz);
-          const c = new THREE.Vector3(x - nx, y, z - nz);
-          const dd = new THREE.Vector3(x + nx, y, z + nz);
-          mb.quad(a, dd, c, b, [0, 0, 0, 1, 1, 1, 1, 0], null, up);
-          const ga = heightAt(prev.x, prev.z) ?? prev.y;
-          const gb = g;
-          // Embankment sides (wider than the road) down to the ground.
-          for (const sgn of [1, -1]) {
-            const top1 = new THREE.Vector3(prev.x + sgn * nx, prev.y, prev.z + sgn * nz);
-            const top2 = new THREE.Vector3(x + sgn * nx, y, z + sgn * nz);
-            const bot1 = new THREE.Vector3(prev.x + sgn * nx * 2.2, Math.min(ga, prev.y) - 0.5, prev.z + sgn * nz * 2.2);
-            const bot2 = new THREE.Vector3(x + sgn * nx * 2.2, Math.min(gb, y) - 0.5, z + sgn * nz * 2.2);
-            deck.quad(top1, bot1, bot2, top2);
-          }
-          prev = { x, z, y };
-        }
-      };
-      const [ax, az] = pts[0];
-      const [bx, bz] = pts[1];
-      const l0 = Math.hypot(bx - ax, bz - az) || 1;
-      ramp(pts[0], (ax - bx) / l0, (az - bz) / l0, ys[0]);
-      const n1 = pts.length - 1;
-      const [cx, cz] = pts[n1];
-      const [dx, dz] = pts[n1 - 1];
-      const l1 = Math.hypot(cx - dx, cz - dz) || 1;
-      ramp(pts[n1], (cx - dx) / l1, (cz - dz) / l1, ys[n1]);
-      // Piers every ~25 m.
-      for (let d = 12; d < total - 6; d += 25) {
-        let k = 0;
-        while (k < acc.length - 1 && acc[k + 1] < d) k++;
-        const t = (d - acc[k]) / ((acc[k + 1] - acc[k]) || 1);
-        const x = pts[k][0] + (pts[k + 1][0] - pts[k][0]) * t;
-        const z = pts[k][1] + (pts[k + 1][1] - pts[k][1]) * t;
-        const yd = ys[k] + (ys[k + 1] - ys[k]) * t;
-        const g = heightAt(x, z);
-        if (g == null || yd - g < 2) continue;
-        const px = (-(pts[k + 1][1] - pts[k][1])) ; const pz = (pts[k + 1][0] - pts[k][0]);
-        const pl = Math.hypot(px, pz) || 1;
-        const ux = px / pl * (hw * 0.6); const uz = pz / pl * (hw * 0.6);
-        const corners = [[x - ux - 0.6, z - uz], [x + ux - 0.6, z + uz], [x + ux + 0.6, z + uz], [x - ux + 0.6, z - uz]];
-        for (let q = 0; q < 4; q++) {
-          const p1 = corners[q];
-          const p2 = corners[(q + 1) % 4];
-          deck.quad(new THREE.Vector3(p1[0], g - 1, p1[1]), new THREE.Vector3(p2[0], g - 1, p2[1]), new THREE.Vector3(p2[0], yd - 1.4, p2[1]), new THREE.Vector3(p1[0], yd - 1.4, p1[1]));
+    if (r.e) {
+      // Earth embankment sides from the road edges down to the ground.
+      for (let k = 0; k < pts.length - 1; k++) {
+        const [ax, az] = pts[k];
+        const [bx, bz] = pts[k + 1];
+        const ga = heightAt(ax, az);
+        const gb = heightAt(bx, bz);
+        if (ga == null || gb == null || (ys[k] - ga < 0.4 && ys[k + 1] - gb < 0.4)) continue;
+        const l = Math.hypot(bx - ax, bz - az) || 1;
+        const nx = (-(bz - az) / l) * hw;
+        const nz = ((bx - ax) / l) * hw;
+        for (const sgn of [1, -1]) {
+          const top1 = new THREE.Vector3(ax + sgn * nx, ys[k], az + sgn * nz);
+          const top2 = new THREE.Vector3(bx + sgn * nx, ys[k + 1], bz + sgn * nz);
+          const spread = (y, g) => 1 + Math.max(0, y - g) * 0.35 / Math.max(hw, 1);
+          const sa = spread(ys[k], ga);
+          const sb = spread(ys[k + 1], gb);
+          const bot1 = new THREE.Vector3(ax + sgn * nx * sa, Math.min(ga, ys[k]) - 0.5, az + sgn * nz * sa);
+          const bot2 = new THREE.Vector3(bx + sgn * nx * sb, Math.min(gb, ys[k + 1]) - 0.5, bz + sgn * nz * sb);
+          deck.quad(top1, bot1, bot2, top2);
         }
       }
     }
@@ -816,7 +811,7 @@ function buildSideRoads(roads, heightAt, asphalt, route) {
       const c = new THREE.Vector3(bx - nx, ys[k + 1], bz - nz);
       const d = new THREE.Vector3(bx + nx, ys[k + 1], bz + nz);
       mb.quad(a, d, c, b, [0, acc[k] / 8, 0, acc[k + 1] / 8, 1, acc[k + 1] / 8, 1, acc[k] / 8], null, up);
-      if (r.b) {
+      if (r.b || r.o) {
         const down = (p) => new THREE.Vector3(p.x, p.y - 1.4, p.z);
         deck.quad(a, down(a), down(d), d);
         deck.quad(c, down(c), down(b), b);
@@ -1619,10 +1614,11 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
     buildRouteRoad(route, heightAt, data.water, data.id === 'home', asphalt, data.roads),
     buildMarkings(route, route.laneData, activeSignals(data.signals, route.length)),
     buildSideRoads(data.roads, heightAt, asphalt, route),
+    buildPiers(data.piers),
     buildBuildings(data.buildings, heightAt, occupancy),
     buildSigns(data.buildings, route, heightAt),
     buildExitSigns(route, data.exits),
-    buildLandmarks(data, heightAt, onRoad),
+    buildLandmarks(data, heightAt, onRoad, routeAtFor(route)),
     buildTrees(route, heightAt, occupancy, data.water),
     buildStreetLights(route),
     buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : data.name.toUpperCase()),

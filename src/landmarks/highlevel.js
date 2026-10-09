@@ -60,7 +60,8 @@ const V = (x, y, z) => new THREE.Vector3(x, y, z);
 
 // Collects flat-shaded quads for one material and builds a single indexed geometry.
 class Builder {
-  constructor() { this.p = []; this.nr = []; this.ix = []; this.v = 0; }
+  // `keep(a, b)` (optional) can veto a part between two points, e.g. one standing on the road.
+  constructor(keep = null) { this.p = []; this.nr = []; this.ix = []; this.v = 0; this.keep = keep; }
   quad(a, b, c, d) {
     _n.crossVectors(_a.subVectors(b, a), _b.subVectors(c, a)).normalize();
     for (const q of [a, b, c, d]) { this.p.push(q.x, q.y, q.z); this.nr.push(_n.x, _n.y, _n.z); }
@@ -76,6 +77,7 @@ class Builder {
   }
   // Prism from a to b with a w x h section and no end caps (8 triangles).
   bar(a, b, w, h) {
+    if (this.keep && !this.keep(a, b, Math.max(w, h) / 2)) return;
     const d = b.clone().sub(a).normalize();
     const ref = Math.abs(d.y) > 0.9 ? V(0, 0, 1) : V(0, 1, 0);
     const s1 = d.clone().cross(ref).normalize().multiplyScalar(w / 2);
@@ -88,6 +90,7 @@ class Builder {
   }
   // Flat strip from a to b, `w` wide, lying in the plane with normal `n` (for a double-sided material).
   ribbon(a, b, w, n) {
+    if (this.keep && !this.keep(a, b, w / 2)) return;
     const d = b.clone().sub(a).normalize();
     const s = d.cross(n).normalize().multiplyScalar(w / 2);
     this.quad(a.clone().add(s), b.clone().add(s), b.clone().sub(s), a.clone().sub(s));
@@ -149,7 +152,7 @@ function riverPier(conc, c, yBase) {
   conc.box(0, PIER_TOP + 0.5, c, 26, 1.0, 11, true);
 }
 
-function buildHighLevel(ctx, steel, lattice, conc, walk, deckDark, rail) {
+function buildHighLevel(ctx, steel, lattice, conc, walk, deckDark, rail, roadHalf = 4) {
   // Panel points: every support (abutments, tower legs, pier legs) plus ~8.8 m panels between.
   const sup = [T0, T1];
   for (const c of BENTS_N) sup.push(c - 3.5, c + 3.5);
@@ -187,8 +190,9 @@ function buildHighLevel(ctx, steel, lattice, conc, walk, deckDark, rail) {
   deckDark.box(0, TOP_Y + 0.45, mid, 11.9, 0.3, L);
   for (const x of [-0.75, 0.75]) rail.bar(V(x, TOP_Y + 0.7, T0), V(x, TOP_Y + 0.7, T1), 0.15, 0.2);
   for (const x of [-5.75, 5.75]) steel.bar(V(x, TOP_Y + 1.05, T0), V(x, TOP_Y + 1.05, T1), 0.12, 0.9);
-  // Lower deck: walkway strips between the game's road edge (±4 m) and the trusses.
-  for (const x of [-5.0, 5.0]) walk.box(x, ROAD_Y - 0.175, mid, 2.0, 0.45, L);
+  // Lower deck: walkway strips between the game's road edge and the trusses (if they fit).
+  const w0 = roadHalf + 0.3, w1 = TRUSS_X - 0.45;
+  if (w1 - w0 > 0.5) for (const sx of [-1, 1]) walk.box(sx * (w0 + w1) / 2, ROAD_Y - 0.175, mid, w1 - w0, 0.45, L);
 
   // Supports.
   for (const c of PIERS) {
@@ -260,19 +264,66 @@ function buildMenzies(ctx, lrtConc, lrtPier, glass) {
 
 export function build(ctx) {
   const g = new THREE.Group();
-  const steel = new Builder(), lattice = new Builder(), conc = new Builder(), walk = new Builder();
-  const deckDark = new Builder(), rail = new Builder(), lrtConc = new Builder(), lrtPier = new Builder(), glass = new Builder();
-
-  buildHighLevel(ctx, steel, lattice, conc, walk, deckDark, rail);
-  // Rotate the trestle onto the real axis and slide it onto the road's centreline.
+  // The trestle's axis from OpenStreetMap; truss-local z runs south along it, x to the right.
   const [ax, az] = ctx.local(...HLB_N);
   const [bx, bz] = ctx.local(...HLB_S);
   const len = Math.hypot(bx - ax, bz - az);
-  const ux = (bx - ax) / len, uz = (bz - az) / len;      // southbound direction
+  let ux = (bx - ax) / len, uz = (bz - az) / len;        // southbound direction
   const k = -(ax * ux + az * uz);                        // foot of the origin on the road line
+  let ox = ax + ux * k, oz = az + uz * k;                // world position of truss-local t = 0
+  let oy = 0, tilt = 0;
+  // In the game, fit the trestle to the road the car actually drives (its line and height
+  // differ a little from OSM), so the car runs between the trusses on the lower deck.
+  let roadHalf = 4;
+  if (ctx.route) {
+    const fit = [];
+    for (let t = T0 + 40; t <= T1 - 40; t += 20) {
+      const r = ctx.route(ox + ux * t, oz + uz * t);
+      if (r && Math.abs(r.lat) < 8) fit.push({ t, lat: r.lat, y: r.y, half: Math.max(r.right, -r.left) });
+    }
+    if (fit.length >= 4) {
+      const line = (key) => {
+        const n = fit.length, mt = fit.reduce((a, f) => a + f.t, 0) / n, mv = fit.reduce((a, f) => a + f[key], 0) / n;
+        let num = 0, den = 0;
+        for (const f of fit) { num += (f.t - mt) * (f[key] - mv); den += (f.t - mt) ** 2; }
+        const slope = den ? num / den : 0;
+        return (t) => mv + slope * (t - mt);
+      };
+      const latAt = line('lat'), yAt = line('y');
+      // Points on the road line at both ends of the fitted stretch (the right normal of the
+      // southbound direction is (-uz, ux); lat > 0 means the point is right of the road).
+      const t0 = fit[0].t, t1 = fit[fit.length - 1].t;
+      const q0 = [ox + ux * t0 + uz * latAt(t0), oz + uz * t0 - ux * latAt(t0)];
+      const q1 = [ox + ux * t1 + uz * latAt(t1), oz + uz * t1 - ux * latAt(t1)];
+      const l2 = Math.hypot(q1[0] - q0[0], q1[1] - q0[1]);
+      ux = (q1[0] - q0[0]) / l2; uz = (q1[1] - q0[1]) / l2;
+      ox = q0[0] - ux * t0; oz = q0[1] - uz * t0;
+      tilt = Math.atan((yAt(t1) - yAt(t0)) / (t1 - t0));
+      oy = yAt(0) - ROAD_Y;
+      roadHalf = Math.max(...fit.map((f) => f.half));
+    }
+  }
   const hlb = new THREE.Group();
-  hlb.position.set(ax + ux * k, 0, az + uz * k);
-  hlb.rotation.y = Math.atan2(ux, uz);
+  hlb.rotation.order = 'YXZ';
+  hlb.rotation.set(-tilt, Math.atan2(ux, uz), 0);
+  hlb.position.set(ox, oy, oz);
+  hlb.updateMatrix();
+  // Leave out any part that would stand on the road, from just above it up to 4.6 m, where
+  // the road curves in and out of the straight trestle at its ends.
+  const _p = new THREE.Vector3();
+  const keep = ctx.route ? (a, b, r0) => {
+    for (const f of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
+      _p.copy(a).lerp(b, f).applyMatrix4(hlb.matrix);
+      const r = ctx.route(_p.x, _p.z);
+      if (!r || _p.y < r.y + 0.05 - r0 || _p.y > r.y + 4.6 + r0) continue;
+      if (r.lat > r.left - 0.3 - r0 && r.lat < r.right + 0.3 + r0) return false;
+    }
+    return true;
+  } : null;
+  const steel = new Builder(keep), lattice = new Builder(keep), conc = new Builder(), walk = new Builder();
+  const deckDark = new Builder(), rail = new Builder(), lrtConc = new Builder(), lrtPier = new Builder(), glass = new Builder();
+
+  buildHighLevel(ctx, steel, lattice, conc, walk, deckDark, rail, roadHalf);
   hlb.add(
     steel.mesh(ctx.mat(0x1e1e1e)),
     lattice.mesh(ctx.mat(0x1e1e1e, 'matte', { side: THREE.DoubleSide })),

@@ -49,6 +49,11 @@ const OW_MIN_RUN = 15;        // 30 m: shorter one-way/two-way flips are glitche
 const UNMATCHED_MIN_RUN = 15; // 30 m: longer stretches with no OSM road are unmarked lanes
 const GUESS_SEARCH = 400;     // 800 m: how far to look for a tagged way of the same street
 const BASE_WINDOW = 75;       // 150 m: one-way right edge follows the fewest lanes this near
+// Road structures (see "Road structures" in CLAUDE.md).
+const HUMP_CLEAR = 7.0;   // m: a hump's deck top above the ground of what passes under it
+const HUMP_MAX = 9;       // m: never lift a route bridge more than this
+const HUMP_RADIUS = 400;  // m: smallest crest/dip radius on a hump ramp
+const HUMP_GRADE = 0.06;  // steepest hump ramp
 const BUILDING_RADIUS = 350;
 const SKYLINE_RADIUS = 2500;
 const SKYLINE_MIN_H = 35;
@@ -341,6 +346,190 @@ function medianArr(a, k) {
   });
 }
 
+// ---------- road structures (see "Road structures" in CLAUDE.md) ----------
+// Decides, per map, which side roads are raised and how high, so the game only draws what
+// it is given and tools/check-roads.mjs can check it. Side-road pieces get `h` (height of
+// each point, metres) when they are not simply on the ground, plus `o: 1` for an overpass
+// deck over the route or `e: 1` for a raised road on an earth embankment. Returns piers.
+const OVERPASS_CLEAR = 6.8; // m: overpass deck top above the route surface
+const SIDE_GRADE = 0.08;    // steepest side-road ramp
+const PIER_EVERY = 22;      // m between overpass piers
+function sideRoadStructures({ otherRoads, pts, tx, tz, ry, lift, bridgeClean, right, left, index, lateral, ground, rawGround, routeGround, N }) {
+  const ptsOf = (r) => { const q = []; for (let k = 0; k < r.p.length; k += 2) q.push([r.p[k] / 10, r.p[k + 1] / 10]); return q; };
+  const setPts = (r, q) => { r.p = q.flat().map((v) => Math.round(v * 10)); };
+  const halfW = (i) => Math.max(right[i], -left[i]);
+  const along = (q) => { const acc = [0]; for (let k = 1; k < q.length; k++) acc.push(acc[k - 1] + Math.hypot(q[k][0] - q[k - 1][0], q[k][1] - q[k - 1][1])); return acc; };
+  // Split long segments so heights can follow a ramp.
+  const densify = (q, step) => {
+    const out = [q[0]];
+    for (let k = 1; k < q.length; k++) {
+      const n = Math.max(1, Math.ceil(Math.hypot(q[k][0] - q[k - 1][0], q[k][1] - q[k - 1][1]) / step));
+      for (let m = 1; m <= n; m++) out.push([q[k - 1][0] + ((q[k][0] - q[k - 1][0]) * m) / n, q[k - 1][1] + ((q[k][1] - q[k - 1][1]) * m) / n]);
+    }
+    return out;
+  };
+  const smooth01 = (t) => (t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t));
+  // Where a polyline crosses the route line: { k: route sample, a: segment index, u: 0..1 along it }.
+  const crossRoute = (q) => {
+    for (let a = 0; a < q.length - 1; a++) {
+      const mx = (q[a][0] + q[a + 1][0]) / 2;
+      const mz = (q[a][1] + q[a + 1][1]) / 2;
+      const len = Math.hypot(q[a + 1][0] - q[a][0], q[a + 1][1] - q[a][1]);
+      const nr = index.nearest(mx, mz, len / 2 + 40);
+      if (!nr) continue;
+      for (let k = Math.max(0, nr.i - 40); k < Math.min(N - 1, nr.i + 40); k++) {
+        if (!segmentsCross(q[a], q[a + 1], pts[k], pts[k + 1])) continue;
+        const la = lateral(k, ...q[a]);
+        const lb = lateral(k, ...q[a + 1]);
+        return { k, a, u: la / (la - lb || 1) };
+      }
+    }
+    return null;
+  };
+  const inCorridor = (x, z, pad) => {
+    const nr = index.nearest(x, z, 60);
+    return nr ? Math.abs(lateral(nr.i, x, z)) < halfW(nr.i) + pad : false;
+  };
+  const piers = [];
+  const used = new Set();
+
+  // 1. Side bridges that cross OVER the route: lift the deck to clear it, ramp the roads
+  //    joined to its ends back down to the ground.
+  for (const [idx, r] of otherRoads.entries()) {
+    if (!r.b || !r.y) continue;
+    const q = densify(ptsOf(r), 6);
+    const c = crossRoute(q);
+    if (!c || bridgeClean[c.k] || lift[c.k] > 0.5) continue; // not over us, or we pass over it
+    const acc = along(q);
+    const total = acc[acc.length - 1] || 1;
+    const straight = acc.map((d) => r.y[0] + ((r.y[1] - r.y[0]) * d) / total + 0.4);
+    const atCross = straight[c.a] + (straight[c.a + 1] - straight[c.a]) * c.u;
+    const need = ry[c.k] + OVERPASS_CLEAR;
+    const delta = Math.max(0, need - atCross);
+    setPts(r, q);
+    r.h = straight.map((y) => r1(y + delta));
+    r.o = 1;
+    used.add(idx);
+    // Approaches: follow the road pieces joined to each end of the deck.
+    for (const end of [0, 1]) {
+      const E = end ? q[q.length - 1] : q[0];
+      const hE = end ? r.h[r.h.length - 1] : r.h[0];
+      const rise = hE - ground(...E);
+      if (rise < 0.5) continue;
+      const L = Math.max(60, rise / SIDE_GRADE);
+      let from = E;
+      let done = 0;
+      for (let hop = 0; hop < 4 && done < L; hop++) {
+        let next = -1;
+        let flip = false;
+        for (const [j, o] of otherRoads.entries()) {
+          if (used.has(j)) continue;
+          const oq = ptsOf(o);
+          if (Math.hypot(oq[0][0] - from[0], oq[0][1] - from[1]) < 2) { next = j; flip = false; break; }
+          if (Math.hypot(oq[oq.length - 1][0] - from[0], oq[oq.length - 1][1] - from[1]) < 2) { next = j; flip = true; break; }
+        }
+        if (next < 0) break;
+        const o = otherRoads[next];
+        let oq = densify(ptsOf(o), 6);
+        if (flip) oq = oq.reverse();
+        const oacc = along(oq);
+        o.h = oq.map(([x, z], k) => {
+          const w = smooth01(1 - (done + oacc[k]) / L);
+          const g = ground(x, z) + 0.08;
+          let h = g + (hE - (ground(...E) + 0.08)) * w;
+          // Never raise an approach inside the route corridor (it would be a wall on the road).
+          if (inCorridor(x, z, 3) && h > g + 0.3) h = g;
+          return r1(h);
+        });
+        if (flip) { oq = oq.reverse(); o.h.reverse(); }
+        setPts(o, oq);
+        o.e = 1;
+        used.add(next);
+        done += oacc[oacc.length - 1];
+        from = flip ? oq[0] : oq[oq.length - 1];
+      }
+    }
+    // Piers under the deck, never on the route or on another road.
+    for (let d = PIER_EVERY / 2; d < total - 4; d += PIER_EVERY) {
+      let k = 0;
+      while (k < acc.length - 2 && acc[k + 1] < d) k++;
+      const t = (d - acc[k]) / ((acc[k + 1] - acc[k]) || 1);
+      const x = q[k][0] + (q[k + 1][0] - q[k][0]) * t;
+      const z = q[k][1] + (q[k + 1][1] - q[k][1]) * t;
+      const top = r.h[k] + (r.h[k + 1] - r.h[k]) * t - 1.4;
+      const g = ground(x, z);
+      if (top - g < 2.5) continue;
+      const dx = q[k + 1][0] - q[k][0];
+      const dz = q[k + 1][1] - q[k][1];
+      const l = Math.hypot(dx, dz) || 1;
+      const nx = -dz / l;
+      const nz = dx / l;
+      const w = r.w * 0.6;
+      // The whole pier footprint (a wall across the deck) must stay off every road.
+      const foot = [-1, -0.5, 0, 0.5, 1].map((f) => [x + nx * w * f, z + nz * w * f]);
+      if (foot.some(([fx, fz]) => inCorridor(fx, fz, 1.5) || onOtherRoad(otherRoads, idx, fx, fz, ptsOf))) continue;
+      piers.push([r1(x), r1(z), r1(top), r1(g - 1), r1(nx), r1(nz), r1(w)]);
+    }
+  }
+
+  // 2. The other half of a divided road beside a raised hump rides at the same lift.
+  for (const [idx, r] of otherRoads.entries()) {
+    if (used.has(idx)) continue;
+    const q0 = ptsOf(r);
+    let hit = false;
+    for (const [x, z] of q0) {
+      const nr = index.nearest(x, z, 45);
+      if (nr && lift[nr.i] > 0.3) { hit = true; break; }
+    }
+    if (!hit) continue;
+    const q = densify(q0, 6);
+    const acc = along(q);
+    const total = acc[acc.length - 1] || 1;
+    let raised = false;
+    const h = q.map(([x, z], k) => {
+      const base = r.b && r.y ? r.y[0] + ((r.y[1] - r.y[0]) * acc[k]) / total + 0.4 : ground(x, z) + 0.08;
+      const nr = index.nearest(x, z, 45);
+      if (!nr || lift[nr.i] <= 0.05) return base;
+      const a = q[Math.max(0, k - 1)];
+      const b = q[Math.min(q.length - 1, k + 1)];
+      const l = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1;
+      if (Math.abs(((b[0] - a[0]) * tx[nr.i] + (b[1] - a[1]) * tz[nr.i]) / l) < 0.85) return base;
+      if (Math.abs(lateral(nr.i, x, z)) < halfW(nr.i) + 1) return base;
+      raised = true;
+      // Level with our road plus the natural height difference between the two carriageways
+      // (none over the bridge itself), blended in as the hump ramps up.
+      const diff = bridgeClean[nr.i] ? 0 : Math.max(-1.5, Math.min(1.5, rawGround(x, z) - routeGround(nr.i)));
+      const w = Math.min(1, lift[nr.i] / 1.5);
+      return Math.max(base, base + (ry[nr.i] + diff + 0.08 - base) * w);
+    });
+    if (!raised) continue;
+    setPts(r, q);
+    r.h = h.map(r1);
+    r.e = 1;
+  }
+  return { piers };
+}
+
+function onOtherRoad(otherRoads, self, x, z, ptsOf) {
+  for (const [j, o] of otherRoads.entries()) {
+    if (j === self) continue;
+    const q = ptsOf(o);
+    for (let k = 0; k < q.length - 1; k++) {
+      if (Math.min(q[k][0], q[k + 1][0]) > x + 60 || Math.max(q[k][0], q[k + 1][0]) < x - 60
+        || Math.min(q[k][1], q[k + 1][1]) > z + 60 || Math.max(q[k][1], q[k + 1][1]) < z - 60) continue;
+      if (segDist(x, z, q[k][0], q[k][1], q[k + 1][0], q[k + 1][1]) < o.w / 2 + 1) return true;
+    }
+  }
+  return false;
+}
+
+// True when segment a-b crosses segment c-d (points as [x, z]).
+function segmentsCross(a, b, c, d) {
+  const cr = (o, p, q) => (p[0] - o[0]) * (q[1] - o[1]) - (p[1] - o[1]) * (q[0] - o[0]);
+  const d1 = cr(c, d, a), d2 = cr(c, d, b), d3 = cr(a, b, c), d4 = cr(a, b, d);
+  return ((d1 > 0) !== (d2 > 0)) && ((d3 > 0) !== (d4 > 0)) && d1 !== 0 && d2 !== 0 && d3 !== 0 && d4 !== 0;
+}
+
 function segDist(px, pz, ax, az, bx, bz) {
   const dx = bx - ax;
   const dz = bz - az;
@@ -561,6 +750,69 @@ async function extractOSM(routes) {
     }
     log(`  kept ${ways.length} ways, ${signals.length} signals from ${n} nodes`);
     return { ways, signals };
+  });
+}
+
+// Railways near the routes (own pass and cache file): a route bridge over a railway gets the
+// same clearance as one over a road. Tunnels and abandoned lines are left out.
+const RAIL_KINDS = new Set(['rail', 'light_rail', 'subway', 'tram', 'narrow_gauge', 'preserved']);
+async function extractRail(routes) {
+  return cached('osm-rail.json', async () => {
+    if (!fs.existsSync(PBF)) throw new Error(`Missing ${PBF}. Download https://download.geofabrik.de/north-america/canada/alberta-latest.osm.pbf there.`);
+    log('Reading OpenStreetMap railways (one-time, a few minutes)…');
+    const near = corridorCells(routes, 300);
+    let minX = Infinity; let maxX = -Infinity; let minZ = Infinity; let maxZ = -Infinity;
+    for (const pts of routes) for (const [x, z] of pts) {
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+    }
+    const [lonA, latA] = unproject(minX - 1000, maxZ + 1000);
+    const [lonB, latB] = unproject(maxX + 1000, minZ - 1000);
+    let cap = 1 << 20;
+    let n = 0;
+    let ids = new Float64Array(cap);
+    let lat7 = new Int32Array(cap);
+    let lon7 = new Int32Array(cap);
+    const find = (id) => {
+      let lo = 0;
+      let hi = n - 1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (ids[mid] === id) return mid;
+        if (ids[mid] < id) lo = mid + 1; else hi = mid - 1;
+      }
+      return -1;
+    };
+    const rails = [];
+    for await (const item of createOSMStream(PBF, { withTags: { node: [], way: ['railway', 'tunnel', 'bridge', 'layer', 'service'], relation: [] } })) {
+      if (item.type === 'node') {
+        if (item.lon < lonA || item.lon > lonB || item.lat < latA || item.lat > latB) continue;
+        if (n === cap) {
+          cap *= 2;
+          const a = new Float64Array(cap); a.set(ids); ids = a;
+          const b = new Int32Array(cap); b.set(lat7); lat7 = b;
+          const c = new Int32Array(cap); c.set(lon7); lon7 = c;
+        }
+        ids[n] = item.id;
+        lat7[n] = Math.round(item.lat * 1e7);
+        lon7[n] = Math.round(item.lon * 1e7);
+        n++;
+      } else if (item.type === 'way') {
+        const t = item.tags;
+        if (!t || !RAIL_KINDS.has(t.railway) || (t.tunnel && t.tunnel !== 'no')) continue;
+        const c = [];
+        for (const ref of item.refs) {
+          const k = find(ref);
+          if (k >= 0) c.push(lon7[k] / 1e7, lat7[k] / 1e7);
+        }
+        let ok = false;
+        for (let i = 0; i < c.length && !ok; i += 2) ok = near(...project(c[i], c[i + 1]));
+        if (ok && c.length >= 4) rails.push({ t, c });
+      } else if (item.type === 'relation') {
+        break;
+      }
+    }
+    log(`  kept ${rails.length} railway ways`);
+    return rails;
   });
 }
 
@@ -888,9 +1140,43 @@ async function buildMap(m, ptsGlobal, osm) {
     i = j;
   }
   ry = smoothArr(ry, 6);
-  // Overpasses: a bridge run whose ground stays near road level is a road crossing another
-  // road (the DEM is bare earth, so it shows no structure). Lift it ~6.5 m with ramps.
+  // Overpass humps. The DEM is bare earth, so a route bridge over another road or a railway
+  // shows no structure: the bridge run is lifted so the deck clears whatever passes under
+  // it. Bridges over creeks or paths keep their real height. See "Road structures" in
+  // CLAUDE.md. Each hump: a plateau over the bridge, ramps gentle enough for a 6% grade and
+  // a crest radius of at least HUMP_RADIUS; neighbouring humps merge instead of stacking.
+  const routeWays = new Set(match.filter(Boolean).map((mm) => mm.ri));
+  const bbox = (p) => {
+    let x0 = Infinity; let x1 = -Infinity; let z0 = Infinity; let z1 = -Infinity;
+    for (const [x, z] of p) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    return [x0, z0, x1, z1];
+  };
+  const underCandidates = [
+    ...roads.map((r, ri) => ({ ri, kind: 'road', name: r.t.name || r.t.ref || r.t.highway, bridge: r.t.bridge && r.t.bridge !== 'no', p: r.p }))
+      .filter((c) => !routeWays.has(c.ri) && !c.bridge),
+    ...(osm.rails ?? []).filter((r) => !(r.t.bridge && r.t.bridge !== 'no')).map((r) => {
+      const p = [];
+      for (let k = 0; k < r.c.length; k += 2) p.push(P(r.c[k], r.c[k + 1]));
+      return { kind: 'rail', name: r.t.name || `railway (${r.t.railway})`, p };
+    }),
+  ].map((c) => ({ ...c, box: bbox(c.p) }));
+  // Route samples in [a, b] where something crosses under the route line.
+  const crossingsUnder = (a, b) => {
+    const seg = pts.slice(a, b + 2);
+    const [x0, z0, x1, z1] = bbox(seg);
+    const out = [];
+    for (const c of underCandidates) {
+      if (c.box[2] < x0 - 5 || c.box[0] > x1 + 5 || c.box[3] < z0 - 5 || c.box[1] > z1 + 5) continue;
+      for (let k = a; k <= b && k < N - 1; k++) {
+        for (let q = 0; q < c.p.length - 1; q++) {
+          if (segmentsCross(pts[k], pts[k + 1], c.p[q], c.p[q + 1])) out.push({ k, kind: c.kind, name: c.name, ri: c.ri });
+        }
+      }
+    }
+    return out;
+  };
   const humps = [];
+  const underWays = new Set(); // OSM roads that pass under a hump
   for (let i = 0; i < N; i++) {
     if (!bridgeClean[i]) continue;
     let j = i;
@@ -898,18 +1184,46 @@ async function buildMap(m, ptsGlobal, osm) {
     const endH = Math.max(ry[Math.max(0, i - 1)], ry[Math.min(N - 1, j)]);
     let minGround = Infinity;
     for (let k = i; k < j; k++) minGround = Math.min(minGround, routeDem[k] - elev0);
-    if (endH - minGround < 6 && (j - i) * STEP < 400) humps.push([i, j]);
+    if (endH - minGround < 6 && (j - i) * STEP < 400) {
+      const under = crossingsUnder(Math.max(0, i - 4), Math.min(N - 1, j + 4));
+      // Lift only as much as the deck needs to clear what is underneath.
+      let lift = 0;
+      for (const u of under) lift = Math.max(lift, routeDem[u.k] - elev0 + HUMP_CLEAR - ry[u.k]);
+      lift = Math.min(HUMP_MAX, lift);
+      if (under.length && lift > 0.3) {
+        const a = Math.min(i, ...under.map((u) => u.k - 6));
+        const b = Math.max(j, ...under.map((u) => u.k + 6));
+        humps.push({ a: Math.max(0, a), b: Math.min(N - 1, b), lift, under: [...new Set(under.map((u) => `${u.kind}: ${u.name}`))] });
+        for (const u of under) if (u.ri != null) underWays.add(u.ri);
+      } else if (!under.length) {
+        log(`  bridge at s=${i * STEP} m kept at its real height (nothing passes under it)`);
+      }
+    }
     i = j;
   }
-  const RAMP = 90 / STEP;
-  for (const [a, b] of humps) {
-    for (let k = Math.max(0, a - RAMP); k < Math.min(N, b + RAMP); k++) {
-      const t = k < a ? (k - (a - RAMP)) / RAMP : k >= b ? 1 - (k - b) / RAMP : 1;
+  const rampOf = (lift) => Math.ceil(Math.max(90, Math.sqrt(6 * HUMP_RADIUS * lift), (1.5 * lift) / HUMP_GRADE) / STEP);
+  // Merge humps whose ramps would meet, so the road never dips between two decks.
+  humps.sort((p, q) => p.a - q.a);
+  const merged = [];
+  for (const h of humps) {
+    const prev = merged[merged.length - 1];
+    if (prev && h.a - prev.b < rampOf(prev.lift) + rampOf(h.lift)) {
+      prev.b = Math.max(prev.b, h.b);
+      prev.lift = Math.max(prev.lift, h.lift);
+      prev.under = [...new Set([...prev.under, ...h.under])];
+    } else merged.push({ ...h });
+  }
+  const lift = new Float32Array(N);
+  for (const h of merged) {
+    const R = rampOf(h.lift);
+    for (let k = Math.max(0, h.a - R); k <= Math.min(N - 1, h.b + R); k++) {
+      const t = k < h.a ? (k - (h.a - R)) / R : k > h.b ? 1 - (k - h.b) / R : 1;
       const w = t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
-      ry[k] += 6.5 * w;
+      lift[k] = Math.max(lift[k], h.lift * w);
     }
   }
-  if (humps.length) log(`  ${humps.length} overpass humps`);
+  for (let k = 0; k < N; k++) ry[k] += lift[k];
+  for (const h of merged) log(`  overpass hump s=${h.a * STEP}-${h.b * STEP} m, +${h.lift.toFixed(1)} m over ${h.under.join('; ')}`);
 
   // Distance from each grid vertex to the route (chamfer), then flatten the ground under the road.
   const dist = new Float32Array(nx * nz).fill(1e9);
@@ -953,7 +1267,10 @@ async function buildMap(m, ptsGlobal, osm) {
           const lat = Math.abs(lateral(nr.i, x, z));
           const halfW = Math.max(right[nr.i], -left[nr.i]) + 3;
           const target = ry[nr.i] - 0.3;
-          const k2 = Math.min(1, Math.max(0, (lat - halfW) / 35));
+          // Beside a raised hump ramp the ground forms a short embankment (about 1:2), so
+          // side roads nearby stay at their own level instead of being lifted with it.
+          const blendW = lift[nr.i] > 0.3 ? Math.max(8, lift[nr.i] * 2) : 35;
+          const k2 = Math.min(1, Math.max(0, (lat - halfW) / blendW));
           const w = 1 - k2 * k2 * (3 - 2 * k2);
           h += (target - h) * w;
           if (lat <= halfW + CELL) h = Math.min(h, target);
@@ -969,13 +1286,22 @@ async function buildMap(m, ptsGlobal, osm) {
     const nr = index.nearest(x, z, 10);
     return nr && Math.abs(lateral(nr.i, x, z)) < Math.max(right[nr.i], -left[nr.i]) * 0.5 + 4;
   };
+  // Beside a raised hump ramp, a side road that meets the route there can't join it (the
+  // route is up on an embankment), so it stops at the foot of the embankment.
+  const besideRamp = (x, z, dx, dz) => {
+    const nr = index.nearest(x, z, 40);
+    if (!nr || bridgeClean[nr.i] || lift[nr.i] <= 1) return false;
+    const l = Math.hypot(dx, dz) || 1;
+    if (Math.abs((dx * tx[nr.i] + dz * tz[nr.i]) / l) > 0.85) return false; // parallel: a twin carriageway
+    return Math.abs(lateral(nr.i, x, z)) < Math.max(right[nr.i], -left[nr.i]) + lift[nr.i] * 2 + 3;
+  };
   const otherRoads = [];
-  for (const r of roads) {
+  roads.forEach((r, ri) => {
     let cur = [];
     const flush = () => {
       if (cur.length >= 2) {
         const isBridge = r.t.bridge && r.t.bridge !== 'no';
-        otherRoads.push({ w: r1(roadWidth(r.t)), b: isBridge ? 1 : 0, l: parseInt(r.t.layer, 10) || 0, p: cur.flat().map((v) => Math.round(v * 10)) });
+        otherRoads.push({ w: r1(roadWidth(r.t)), b: isBridge ? 1 : 0, l: parseInt(r.t.layer, 10) || 0, p: cur.flat().map((v) => Math.round(v * 10)), ri });
       }
       cur = [];
     };
@@ -983,7 +1309,11 @@ async function buildMap(m, ptsGlobal, osm) {
       const p = r.p[k];
       const onRoute = k > 0 && roadIsRoute(...p) && roadIsRoute(...r.p[k - 1])
         && roadIsRoute((p[0] + r.p[k - 1][0]) / 2, (p[1] + r.p[k - 1][1]) / 2);
-      if (onRoute) {
+      const q = r.p[k > 0 ? k - 1 : Math.min(k + 1, r.p.length - 1)];
+      const blocked = !underWays.has(ri) && besideRamp(p[0], p[1], p[0] - q[0], p[1] - q[1]);
+      if (blocked) {
+        flush();
+      } else if (onRoute) {
         flush();
         cur = [p];
       } else {
@@ -991,7 +1321,7 @@ async function buildMap(m, ptsGlobal, osm) {
       }
     }
     flush();
-  }
+  });
   // Bridge roads get explicit end heights so the client can draw a straight deck.
   const sampleGrid = (x, z) => {
     const fi = (x - gx0) / CELL;
@@ -1009,6 +1339,21 @@ async function buildMap(m, ptsGlobal, osm) {
     r.y = [r1(sampleGrid(p[0] / 10, p[1] / 10)), r1(sampleGrid(p[p.length - 2] / 10, p[p.length - 1] / 10))];
   }
   log(`  ${otherRoads.length} side road pieces`);
+
+  // Natural ground (before the road was cut in or built up), for side roads that ride beside it.
+  const rawGround = (x, z) => {
+    const fi = Math.max(0, Math.min(nx - 1.001, (x - gx0) / CELL));
+    const fj = Math.max(0, Math.min(nz - 1.001, (z - gz0) / CELL));
+    const i = Math.floor(fi);
+    const j = Math.floor(fj);
+    const u = fi - i;
+    const v = fj - j;
+    const h = (a, b) => dem[b * nx + a] - elev0;
+    return h(i, j) * (1 - u) * (1 - v) + h(i + 1, j) * u * (1 - v) + h(i, j + 1) * (1 - u) * v + h(i + 1, j + 1) * u * v;
+  };
+  const routeGround = (i) => routeDem[i] - elev0;
+  const structures = sideRoadStructures({ otherRoads, pts, tx, tz, ry, lift, bridgeClean, right, left, index, lateral, ground: sampleGrid, rawGround, routeGround, N });
+  for (const r of otherRoads) delete r.ri;
 
   // Buildings.
   const city = await loadRooflines(m, ptsGlobal);
@@ -1195,6 +1540,7 @@ async function buildMap(m, ptsGlobal, osm) {
       right: right.map(r1),
       left: left.map(r1),
       laneFormat: LANE_FORMAT,
+      ...(lift.some((v) => v > 0) ? { lift: Array.from(lift, r1) } : {}),
       ow,
       ...(ctr.some(Boolean) ? { ctr } : {}),
       src,
@@ -1205,6 +1551,7 @@ async function buildMap(m, ptsGlobal, osm) {
     terrain: { x0: gx0, z0: gz0, cell: CELL, nx, nz, h: Buffer.from(heights.buffer).toString('base64') },
     water: r1(waterLevel + 1.2),
     roads: otherRoads,
+    piers: structures.piers,
     buildings,
     signals,
     exits,
@@ -1256,6 +1603,7 @@ for (const m of MAPS) {
   allRoutes.push(await loadRoute(m));
 }
 const osm = await extractOSM(allRoutes);
+osm.rails = await extractRail(allRoutes);
 const indexFile = path.join(OUT, 'index.json');
 const index = fs.existsSync(indexFile) ? JSON.parse(fs.readFileSync(indexFile, 'utf8')) : [];
 for (const m of maps) {

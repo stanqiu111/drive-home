@@ -18,6 +18,7 @@ export class Route {
     this.lanesArr = d.lanes;
     this.rightArr = d.right;
     this.leftArr = d.left;
+    this.liftArr = d.lift ?? null; // metres each sample is raised for an overpass hump
     // Lane data for lane-layout.js (one-way flags, centre turn lanes), in its own shape.
     this.laneData = { step: d.step, right: d.right, left: d.left, lanes: d.lanes, ow: d.ow, ctr: d.ctr, laneFormat: d.laneFormat };
     this.cls = d.cls;

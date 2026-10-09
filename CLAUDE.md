@@ -136,8 +136,8 @@ The owner switched computers mid-task. This section is the compressed history an
 
 ### Where things are
 
-- **Live** (`main`, last deploy `dcaca2c`): 8 maps, landmarks, the map-select screen, building styles, store and exit signs, overpasses, online leaderboard and achievements.
-- **Branch `wip/road-lines-and-sound`** (not live, waiting for the owner's OK). It holds the road-line fix, the road-structure fix and the sound effects (2026-10-09), the check in `npm run build`, these notes and `tools/dev/shots.mjs`. To go live once the owner approves: merge into `main` and push.
+- **Live** (`main`, deployed 2026-10-09 with the owner's OK): 8 maps, landmarks, the map-select screen, building styles, store and exit signs, the online leaderboard and achievements. Also live: the road-line rewrite, the road-structure fix, signals at real junctions and the sound effects.
+- **In progress:** a performance pass for the owner's report of fps dropping to ~30 on their Retina MacBook. It covers adaptive resolution, camera far matched to the fog, precompiled shaders, no runtime building, and lighter distant traffic. Work in progress goes on a branch, and it goes live only after the owner checks it locally and says so.
 
 ### Owner to-dos
 

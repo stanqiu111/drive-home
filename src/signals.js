@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { LANE_W } from './route.js';
-import { STOP_BACK, stopLineExtent, lerpAt } from './lane-layout.js';
+import { stopLineExtent, lerpAt } from './lane-layout.js';
 
 const CYCLE = 24;
 const GREEN = 12;
@@ -42,10 +42,9 @@ export class Signals {
     const lineMat = new THREE.MeshStandardMaterial({ color: 0xe8e8e8, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 });
     const lampGeo = new THREE.SphereGeometry(0.15, 12, 8);
 
-    this.list = positions.map((s, i) => {
+    this.list = positions.map(({ s, stop }, i) => {
       // Lanes and edges at the stop line (lane-layout.js), not at the signal: the road can
-      // change in between. One head per lane, up to 5.
-      const stop = s - STOP_BACK;
+      // change in between. One head per lane, up to 5. `stop` comes from the real junction.
       const [inner, outer] = stopLineExtent(route.laneData, stop);
       const lanes = Math.max(1, Math.min(5, Math.round((outer - inner) / LANE_W)));
       const right = lerpAt(route.laneData, route.laneData.right, s); // the pole stands at the signal
@@ -106,7 +105,7 @@ export class Signals {
       for (let lat = f.left + 0.4; lat < f.right - 0.3; lat += 1.1) quad(stop + CROSSWALK[0], stop + CROSSWALK[1], lat, lat + 0.55);
       this.group.add(new THREE.Mesh(mergeGeometries(lineGeo.map(plain)), lineMat));
 
-      return { s, stopS: s - STOP_BACK, offset: (i * 7.3) % CYCLE, lamps, state: 'green' };
+      return { s, stopS: stop, offset: (i * 7.3) % CYCLE, lamps, state: 'green' };
     });
   }
 

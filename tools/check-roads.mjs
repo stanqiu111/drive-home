@@ -9,8 +9,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  markingPlan, hasLaneData, laneZones, activeSignals, drivableLanes, ourInnerEdge, stopLineExtent, lerpAt,
-  LANE_W, MAX_SIDESTEP, STOP_BACK, DASH_EVERY,
+  markingPlan, laneInput, hasLaneData, laneZones, activeSignals, drivableLanes, ourInnerEdge, stopLineExtent, lerpAt,
+  LANE_W, MAX_SIDESTEP, DASH_EVERY,
 } from '../src/lane-layout.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,7 +39,9 @@ function runs(n, key) {
 
 function checkMap(id) {
   const data = JSON.parse(fs.readFileSync(path.join(MAP_DIR, `${id}.json`), 'utf8'));
-  const rd = { step: data.step, ...data.route };
+  const full = { step: data.step, ...data.route };
+  // Exactly what the game hands to lane-layout.js, plus the raw layout and heights for the checks here.
+  const rd = { ...laneInput(full), src: full.src, y: full.y, lift: full.lift };
   const { step } = rd;
   const n = rd.right.length;
   const length = (n - 1) * step;
@@ -59,7 +61,7 @@ function checkMap(id) {
   const raw = new Array(n);
   rd.src.forEach((r, k) => {
     const end = k + 1 < rd.src.length ? rd.src[k + 1][0] : n;
-    for (let i = r[0]; i < end; i++) raw[i] = { ow: r[1], ours: r[2], theirs: r[3], ctr: r[4], guessed: !!(r[5] & 1), unmatched: !!(r[5] & 2), rb: !!(r[5] & 4) };
+    for (let i = r[0]; i < end; i++) raw[i] = { ow: r[1], ours: r[2], theirs: r[3], ctr: r[4], guessed: !!(r[5] & 1), unmatched: !!(r[5] & 2), rb: !!(r[5] & 4), link: !!(r[5] & 8) };
   });
   const rawKind = (i) => (raw[i].ow === 1 ? 1 : 0);
   const kind = (i) => (rd.ow[i] === 1 ? 1 : 0);
@@ -82,8 +84,8 @@ function checkMap(id) {
     const len = (r.b - r.a + 1) * step;
     if (len >= MIN_LAYOUT || r.a === 0 || r.b === n - 1) return;
     const sameKindNeighbour = [lay[k - 1], lay[k + 1]].some((q) => q && rd.ow[q.a] === rd.ow[r.a]);
-    const roundabout = raw[r.a].rb || raw[r.b].rb;
-    if (sameKindNeighbour && !roundabout) bad('layout-run', r.a * step, `${r.k} (ow/lanes/centre) lasts only ${len} m`);
+    const kept = raw[r.a].rb || raw[r.b].rb || (raw[r.a].link && raw[r.b].link); // roundabouts and ramps keep their own lanes
+    if (sameKindNeighbour && !kept) bad('layout-run', r.a * step, `${r.k} (ow/lanes/centre) lasts only ${len} m`);
   });
 
   // 3. Steady-state widths match the lane layout.
@@ -154,15 +156,88 @@ function checkMap(id) {
       if (lat - HALF_CAR < inner - 0.3 || lat + HALF_CAR > outer + 0.3) { bad('traffic-off-road', s, `lane ${lane} centre at ${lat.toFixed(2)} outside [${inner.toFixed(2)}, ${outer.toFixed(2)}]`); break; }
     }
   }
-  // 8. Stop lines cover our lanes and stay on the road.
+  // 8. Stop lines cover our lanes, stay on the road and stand before the junction; the gap in
+  //    the lane lines covers every side street meeting our road at that junction.
+  const mouths = sideRoadMouths(data, rd);
   for (const sig of signals) {
-    const s = sig - STOP_BACK;
+    const s = sig.stop;
     const [a, b] = stopLineExtent(rd, s);
     if (a < at(rd.left, s) - 0.05 || b > at(rd.right, s) + 0.05 || b - a < LANE_W * 0.7) bad('stop-line', s, `stop line [${a.toFixed(2)}, ${b.toFixed(2)}] vs road [${at(rd.left, s).toFixed(2)}, ${at(rd.right, s).toFixed(2)}]`);
     if (!inBox(s + 1)) bad('stop-line', s, 'lines are not broken at this intersection');
+    for (const [m0, m1] of mouths) {
+      if (m1 < sig.stop - 2 || m0 > sig.end + 2 || m1 < sig.s - 40 || m0 > sig.s + 40) continue;
+      if (m0 < sig.stop + 1.5) bad('stop-line', s, `stop line inside a cross street (${m0.toFixed(0)}-${m1.toFixed(0)} m)`);
+      else if (m1 > sig.end + 0.5) bad('junction', m1, `lane lines run into a cross street (${m0.toFixed(0)}-${m1.toFixed(0)} m) past the junction gap ending at ${sig.end}`);
+    }
+  }
+  // 9. In real positions, no painted line runs backwards (folds over on a tight turn).
+  const tan = (s) => {
+    const i = Math.max(1, Math.min(n - 2, Math.round(s / step)));
+    const l = Math.hypot(rd.x[i + 1] - rd.x[i - 1], rd.z[i + 1] - rd.z[i - 1]) || 1;
+    return [(rd.x[i + 1] - rd.x[i - 1]) / l, (rd.z[i + 1] - rd.z[i - 1]) / l];
+  };
+  const world = (s, lat) => {
+    const [tx, tz] = tan(s);
+    return [at(rd.x, s) - tz * lat, at(rd.z, s) + tx * lat];
+  };
+  for (const m of plan) {
+    for (let k = 1; k < m.pts.length; k++) {
+      const [s0, l0] = m.pts[k - 1];
+      const [s1, l1] = m.pts[k];
+      const a = world(s0, l0);
+      const b = world(s1, l1);
+      const [tx, tz] = tan((s0 + s1) / 2);
+      if ((b[0] - a[0]) * tx + (b[1] - a[1]) * tz < -0.05) { bad('fold', s1, `${m.color} ${m.slot} line folds back on a tight turn`); break; }
+    }
   }
   checkStructures(data, rd, bad);
   return { id, problems, lines: plan.length };
+}
+
+// Where side roads (on the ground) meet our road: [s from, s to] of each one's surface.
+function sideRoadMouths(data, rd) {
+  const { step } = rd;
+  const n = rd.x.length;
+  const out = [];
+  const grid = new Map();
+  for (let i = 0; i < n; i++) {
+    const k = `${Math.floor(rd.x[i] / 25)},${Math.floor(rd.z[i] / 25)}`;
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(i);
+  }
+  const nearest = (x, z) => {
+    let best = -1;
+    let bd = 40;
+    for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) {
+      for (const i of grid.get(`${Math.floor(x / 25) + a},${Math.floor(z / 25) + b}`) ?? []) {
+        const d = Math.hypot(rd.x[i] - x, rd.z[i] - z);
+        if (d < bd) { bd = d; best = i; }
+      }
+    }
+    return best;
+  };
+  for (const r of data.roads ?? []) {
+    if (r.o || r.e || r.p.length < 4) continue;
+    for (const end of [0, 1]) {
+      const k = end ? r.p.length - 2 : 0;
+      const kk = end ? r.p.length - 4 : 2;
+      const ex = r.p[k] / 10, ez = r.p[k + 1] / 10;
+      const i = nearest(ex, ez);
+      if (i < 0) continue;
+      const a = Math.max(0, i - 2), b = Math.min(n - 1, i + 2);
+      const l0 = Math.hypot(rd.x[b] - rd.x[a], rd.z[b] - rd.z[a]) || 1;
+      const tx = (rd.x[b] - rd.x[a]) / l0, tz = (rd.z[b] - rd.z[a]) / l0;
+      const lat = (ex - rd.x[i]) * -tz + (ez - rd.z[i]) * tx;
+      if (Math.abs(lat) > Math.max(rd.right[i], -rd.left[i]) + 8) continue;
+      const dx = ex - r.p[kk] / 10, dz = ez - r.p[kk + 1] / 10;
+      const l = Math.hypot(dx, dz) || 1;
+      const sin = Math.abs((dx * tz - dz * tx) / l);
+      if (sin < 0.35) continue; // running alongside, not a cross street
+      const half = r.w / 2 / sin;
+      out.push([i * step - half, i * step + half]);
+    }
+  }
+  return out;
 }
 
 // Road structures (see "Road structures" in CLAUDE.md): nothing raised by the builder may

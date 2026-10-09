@@ -22,12 +22,22 @@ export const DASH_EVERY = 12;   // dash period (m)
 export const TAPER_MAX = 0.18;  // m per sample: most a road edge may move sideways (builder)
 export const EDGE_ROUND = 0.1;  // the builder stores edges rounded to 0.1 m
 export const MAX_SIDESTEP = TAPER_MAX + EDGE_ROUND + 0.02; // per sample, for the checker
-export const OW_ZONE = 25;      // samples either side of a one-way/two-way change without dashes
+export const OW_ZONE = 12;      // samples either side of a one-way/two-way change without dashes
 const EDGE_IN = 0.25;           // solid edge line, inset from the asphalt edge
 const ROOM = 0.75 * LANE_W;     // a lane line needs at least this much road beyond it
-// Lines stop at a signal's stop line and start again past the intersection.
-export const STOP_BACK = 7;     // stop line distance before the signal (m)
-export const BOX_AFTER = 9;     // intersection ends this far past the signal (m)
+// Lines stop at a signal's stop line and start again past the intersection. The builder
+// writes each signal as [s, stop, end] from the real junction; old map files have plain
+// numbers, which use these fixed distances.
+export const STOP_BACK = 7;     // stop line distance before the signal (m), old files
+export const BOX_AFTER = 9;     // intersection ends this far past the signal (m), old files
+const MIN_DASH = 1.5;           // m: shorter dash pieces (where a lane starts) are left out
+const FOLD = 0.8;               // a line closer than this share of the turn radius to the turn's centre folds over
+
+// The lane data every function here takes, built from a map file's route the same way by
+// the game (route.js) and the checker, so the checker always tests what the game draws.
+export function laneInput(d) {
+  return { step: d.step, x: d.x, z: d.z, right: d.right, left: d.left, lanes: d.lanes, ow: d.ow, ctr: d.ctr, laneFormat: d.laneFormat };
+}
 
 export function hasLaneData(rd) {
   return rd.laneFormat === LANE_FORMAT && Array.isArray(rd.ow);
@@ -81,9 +91,39 @@ export function stopLineExtent(rd, s) {
   return [ourInnerEdge(rd, s) + 0.15, lerpAt(rd, rd.right, s) - 0.15];
 }
 
+// Signals as { s, stop, end }.
+export function signalList(signals = []) {
+  return signals.map((v) => (Array.isArray(v) ? { s: v[0], stop: v[1], end: v[2] } : { s: v, stop: v - STOP_BACK, end: v + BOX_AFTER }));
+}
+
 // Signals the game builds: none in the last 120 m (the finish).
 export function activeSignals(signals = [], length) {
-  return signals.filter((s) => s < length - 120);
+  return signalList(signals).filter((g) => g.s < length - 120);
+}
+
+// Signed curvature of the route line per sample (1/m, + = turning right), as in route.js.
+const curvCache = new WeakMap();
+export function routeCurvature(rd) {
+  let k = curvCache.get(rd);
+  if (k) return k;
+  const n = rd.x.length;
+  const tx = new Float64Array(n);
+  const tz = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i - 2);
+    const b = Math.min(n - 1, i + 2);
+    const l = Math.hypot(rd.x[b] - rd.x[a], rd.z[b] - rd.z[a]) || 1;
+    tx[i] = (rd.x[b] - rd.x[a]) / l;
+    tz[i] = (rd.z[b] - rd.z[a]) / l;
+  }
+  k = new Float64Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = Math.max(0, i - 4);
+    const b = Math.min(n - 1, i + 4);
+    k[i] = Math.atan2(tx[a] * tz[b] - tz[a] * tx[b], tx[a] * tx[b] + tz[a] * tz[b]) / ((b - a) * rd.step || 1);
+  }
+  curvCache.set(rd, k);
+  return k;
 }
 
 // Sample flags shared by the plan and the checker.
@@ -94,7 +134,7 @@ export function laneZones(rd, signals = []) {
     if ((rd.ow[i] === 1) === (rd.ow[i - 1] === 1)) continue;
     for (let j = Math.max(0, i - OW_ZONE); j < Math.min(n, i + OW_ZONE); j++) owZone[j] = 1;
   }
-  const boxes = signals.map((s) => [s - STOP_BACK + 0.3, s + BOX_AFTER]);
+  const boxes = signals.map((g) => [g.stop + 0.3, g.end]);
   return { owZone, boxes };
 }
 
@@ -115,6 +155,9 @@ export function markingPlan(rd, signals = []) {
   const { owZone, boxes } = laneZones(rd, signals);
   const inBox = (s) => boxes.some(([a, b]) => s > a && s < b);
   const at = (arr, s) => lerpAt(rd, arr, s);
+  const curv = routeCurvature(rd);
+  // On a turn tighter than the road is wide, lines on the inside would fold over.
+  const folds = (s, lat) => lat * curv[clampI(rd, Math.round(s / step))] > FOLD;
 
   const out = [];
   // A line along the route made of runs where `latAt(s)` is not null. `dashed` keeps only
@@ -122,7 +165,8 @@ export function markingPlan(rd, signals = []) {
   const line = (color, width, slot, latAt, dashed = false) => {
     let cur = null;
     const push = (s) => {
-      const lat = inBox(s) ? null : latAt(s);
+      let lat = inBox(s) ? null : latAt(s);
+      if (lat != null && folds(s, lat)) lat = null;
       if (lat == null) { cur = null; return; }
       if (!cur) { cur = { color, width, slot, pts: [] }; out.push(cur); }
       cur.pts.push([s, lat]);
@@ -135,6 +179,8 @@ export function markingPlan(rd, signals = []) {
       cur = null;
       for (let s = s0; s < s0 + DASH - 1e-6; s += step) push(s);
       push(Math.min(s0 + DASH, last));
+      const d = out[out.length - 1];
+      if (cur && d === cur && d.pts[d.pts.length - 1][0] - d.pts[0][0] < MIN_DASH) out.pop();
       cur = null;
     }
   };

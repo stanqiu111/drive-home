@@ -245,8 +245,8 @@ function cleanLaneLayout(raw, names) {
   const n = raw.length;
   // The raw layout, run-length encoded, goes into the map file so tools/check-roads.mjs can
   // compare the cleaned result with OpenStreetMap: [sample, ow, ours, theirs, ctr, flags]
-  // with flags 1 = lane counts guessed, 2 = no OSM road matched, 4 = roundabout.
-  const flags = (l) => (l.guessed ? 1 : 0) | (l.unmatched ? 2 : 0) | (l.rb ? 4 : 0);
+  // with flags 1 = lane counts guessed, 2 = no OSM road matched, 4 = roundabout, 8 = ramp (link).
+  const flags = (l) => (l.guessed ? 1 : 0) | (l.unmatched ? 2 : 0) | (l.rb ? 4 : 0) | (l.link ? 8 : 0);
   const src = runsOf(raw, (l) => `${layoutKey(l)}/${flags(l)}`).map((r) => {
     const l = raw[r.a];
     return [r.a, l.ow, l.ours, l.theirs, l.ctr, flags(l)];
@@ -283,10 +283,11 @@ function cleanLaneLayout(raw, names) {
     return prev.b - prev.a >= next.b - next.a ? 'prev' : 'next';
   });
   // 4. Lane-count changes shorter than LAYOUT_MIN_RUN (OSM splits ways at turn bays and
-  //    intersections) join a neighbour of the same kind: never a roundabout, tagged
-  //    counts before guessed ones, then the longer. Never across a one-way/two-way change.
+  //    intersections) join a neighbour of the same kind: never a roundabout or a ramp
+  //    (30 m or more), tagged counts before guessed ones, then the longer. Never across a
+  //    one-way/two-way change.
   absorbShortRuns(lay, layoutKey, LAYOUT_MIN_RUN, (arr, r, prev, next) => {
-    if (arr[r.a].rb) return null;
+    if (arr[r.a].rb || (arr[r.a].link && arr[r.b].link && r.b - r.a + 1 >= OW_MIN_RUN)) return null;
     const score = (q) => {
       if (!q || kind(arr[q.a]) !== kind(arr[r.a]) || arr[q.a].ow !== arr[r.a].ow) return -1;
       return (arr[q.a].rb ? 0 : 4e6) + (arr[q.a].guessed ? 0 : 2e6) + (q.b - q.a);
@@ -1088,7 +1089,7 @@ async function buildMap(m, ptsGlobal, osm) {
   for (let i = 0; i < N; i++) {
     const t = roads[match[i].ri].t;
     const li = laneInfo(t, match[i].forward);
-    raw.push({ ow: li.oneway ? 1 : 0, ours: li.ours, theirs: li.oneway ? 0 : li.theirs, ctr: li.ctr, guessed: li.guessed, rb: li.roundabout, unmatched: !matched[i] });
+    raw.push({ ow: li.oneway ? 1 : 0, ours: li.ours, theirs: li.oneway ? 0 : li.theirs, ctr: li.ctr, guessed: li.guessed, rb: li.roundabout, link: /_link$/.test(t.highway), unmatched: !matched[i] });
     cls.push(roadClass(t.highway));
     bridge.push(t.bridge && t.bridge !== 'no' ? 1 : 0);
     names.push(t.name || t.ref || '');
@@ -1513,18 +1514,75 @@ async function buildMap(m, ptsGlobal, osm) {
   exits.sort((a, b) => a.s - b.s);
   log(`  ${exits.length} exit signs`);
 
-  // Traffic signals on the route.
-  const signals = [];
+  // Traffic signals on the route, as [s, stop, end]: the signal, its stop line and the far
+  // side of the junction (see "Road lines" in CLAUDE.md). OSM puts signal nodes on our road,
+  // on the cross street or on the other carriageway; nodes within 60 m form one junction,
+  // and the first node actually on our road wins. The stop line and the gap in the lane
+  // lines come from where the cross streets meet our road, not from a fixed distance.
+  const sigNodes = [];
   for (const [lon, lat] of osm.signals) {
     const [x, z] = P(lon, lat);
     const nr = index.nearest(x, z, 30);
     if (!nr) continue;
-    if (Math.abs(lateral(nr.i, x, z)) > Math.max(right[nr.i], -left[nr.i]) + 15) continue;
+    const off = Math.abs(lateral(nr.i, x, z)) - Math.max(right[nr.i], -left[nr.i]);
+    if (off > 15) continue;
     const s = nr.i * STEP;
     if (s < 60 || s > (N - 30) * STEP) continue;
-    if (signals.every((v) => Math.abs(v - s) > 60)) signals.push(s);
+    sigNodes.push({ s, onRoad: off <= 4, off });
   }
-  signals.sort((a, b) => a - b);
+  sigNodes.sort((a, b) => a.s - b.s);
+  const sigClusters = [];
+  for (const nd of sigNodes) {
+    const last = sigClusters[sigClusters.length - 1];
+    if (last && nd.s - last[last.length - 1].s <= 60) last.push(nd); else sigClusters.push([nd]);
+  }
+  // Where side roads meet our road: [s from, s to] of each one's surface along the route.
+  const mouths = [];
+  for (const r of otherRoads) {
+    if (r.o || r.e) continue;
+    for (const end of [0, 1]) {
+      const k = end ? r.p.length - 2 : 0;
+      const kk = end ? r.p.length - 4 : 2;
+      if (kk < 0 || kk >= r.p.length) continue;
+      const ex = r.p[k] / 10, ez = r.p[k + 1] / 10;
+      const nr = index.nearest(ex, ez, 40);
+      if (!nr || Math.abs(lateral(nr.i, ex, ez)) > Math.max(right[nr.i], -left[nr.i]) + 8) continue;
+      const dx = ex - r.p[kk] / 10, dz = ez - r.p[kk + 1] / 10;
+      const l = Math.hypot(dx, dz) || 1;
+      const sin = Math.abs((dx * tz[nr.i] - dz * tx[nr.i]) / l);
+      const half = r.w / 2 / Math.max(0.35, sin);
+      mouths.push([nr.i * STEP - half, nr.i * STEP + half]);
+    }
+  }
+  const signals = [];
+  for (const cl of sigClusters) {
+    const on = cl.filter((nd) => nd.onRoad);
+    const s = on.length ? on[0].s : cl.reduce((a, b) => (b.off < a.off ? b : a)).s;
+    // The junction: side-road mouths near the signal, around the one closest to it.
+    const near = mouths.filter(([a, b]) => b > s - 35 && a < s + 35);
+    let lo = s;
+    let hi = s;
+    if (near.length) {
+      const mid = (m) => (m[0] + m[1]) / 2;
+      const c = mid(near.reduce((a, b) => (Math.abs(mid(b) - s) < Math.abs(mid(a) - s) ? b : a)));
+      // Grow from the closest mouth: any mouth within 7 m of the junction so far joins it
+      // (the other leg of the cross street, a skewed corner, a slip lane).
+      lo = c;
+      hi = c;
+      for (let grew = true; grew;) {
+        grew = false;
+        for (const [a, b] of near) {
+          if (b < lo - 7 || a > hi + 7 || (a >= lo && b <= hi)) continue;
+          lo = Math.min(lo, a);
+          hi = Math.max(hi, b);
+          grew = true;
+        }
+      }
+    }
+    const stop = Math.max(10, lo - 4.6); // stop line, then the crosswalk (1.2-4.2 m past it), then the junction
+    if (signals.length && stop < signals[signals.length - 1][2] + 5) continue;
+    signals.push([Math.round(s), Math.round(stop * 10) / 10, Math.round((hi + 1.5) * 10) / 10]);
+  }
   log(`  ${signals.length} traffic signals`);
 
   const out = {

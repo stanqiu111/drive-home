@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { LANE_W, drivableLanes } from './lane-layout.js';
+import { LANE_W, drivableLanes, laneInput } from './lane-layout.js';
 
 export { LANE_W };
 export const MAX_LANES = 4;
@@ -20,7 +20,7 @@ export class Route {
     this.leftArr = d.left;
     this.liftArr = d.lift ?? null; // metres each sample is raised for an overpass hump
     // Lane data for lane-layout.js (one-way flags, centre turn lanes), in its own shape.
-    this.laneData = { step: d.step, right: d.right, left: d.left, lanes: d.lanes, ow: d.ow, ctr: d.ctr, laneFormat: d.laneFormat };
+    this.laneData = laneInput(d);
     this.cls = d.cls;
     this.bridge = d.bridge;
     this.names = d.names;

@@ -91,10 +91,13 @@ Lane lines were wrong from the first version on: short double-yellow lines poppe
 
 - **One source.** Lines, stop-line extents and the lanes traffic may use all come from `src/lane-layout.js`. `buildMarkings()` in `world.js` only turns its plan into meshes, `signals.js` and `route.lanes()` call it, and `tools/check-roads.mjs` checks the same plan. Don't place lane lines or lanes anywhere else.
 - **No guessing.** Never decide one-way vs two-way from widths. The builder writes `route.ow` per sample: 1 = one-way carriageway, 0 = two-way road, 2 = unmarked lane at the ends (parking lots), plus `lanes`, `ctr` (centre turn lane), `right`, `left`, `laneFormat: 2` and `src` (the raw OSM layout, run-length encoded).
-- **Clean as one unit.** In `tools/build-maps.mjs`, `cleanLaneLayout()` cleans the whole layout together. It only smooths away one-way/two-way flips under 30 m, merges lane-count changes under 80 m into a neighbour of the same kind, and keeps roundabouts. Then `laneEdges()` makes the edges. Never smooth or filter `lanes`, `ow`, `right` or `left` on its own. On one-way roads the right edge follows the through lanes, so turn bays open on the median side; two-way roads are centred on the route line.
+- **Clean as one unit.** In `tools/build-maps.mjs`, `cleanLaneLayout()` cleans the whole layout together. It only smooths away one-way/two-way flips under 30 m, merges lane-count changes under 80 m into a neighbour of the same kind, and keeps roundabouts and ramps (30 m or longer) at their own lane counts. Then `laneEdges()` makes the edges. Never smooth or filter `lanes`, `ow`, `right` or `left` on its own. On one-way roads the right edge follows the through lanes, so turn bays open on the median side; two-way roads are centred on the route line.
 - **No caps, no blocks.** Don't cap lane counts when drawing lines; `route.lanes()` caps at 4 only for traffic and pickups. Take sideways offsets at every route sample, never once per block.
-- **The check.** `npm run build` runs `npm run check:roads` first and stops on any failure, so Vercel won't deploy broken lines. The check compares against the raw OSM layout in `route.src`, not just against the cleaned data, so a cleaning mistake fails. Run it after touching the builder, `public/maps/*.json`, `route.js`, `lane-layout.js`, `signals.js` or the road code in `world.js`. After changing lane logic, rebuild ALL maps (old map files draw no lines). Don't loosen its limits to make it pass; fix the data or the plan.
-- The check covers geometry, not looks. After road changes, also screenshot a few lane-count changes, two-way stretches and signals in the game.
+- **Signals come from the real junction.** The builder writes each signal as `[s, stop, end]`. It picks the first OSM signal node actually on our road, then takes the stop line and the gap in the lane lines from where the cross streets meet the road. So the lines break across the whole junction, and the stop line plus crosswalk sit just before it.
+- **No folds.** On a turn tighter than the road is wide, lines (`lane-layout.js`) and sidewalks (`world.js`) on the inside are left out. Sidewalks are also left out where they would lie on another stretch of the route (the U-turn at the Sherwood finish).
+- **Same input everywhere.** `laneInput()` builds the lane data for both the game (`route.laneData`) and the checker. Never hand `lane-layout.js` a differently shaped object: once the checker passed while the game crashed because of that.
+- **The check.** `npm run build` runs `npm run check:roads` first and stops on any failure, so Vercel won't deploy broken lines. The check compares against the raw OSM layout in `route.src`, not just against the cleaned data, so a cleaning mistake fails. It also fails when a stop line is inside a cross street, when lane lines run into a junction past the gap, and when a line folds back in real positions. Run it after touching the builder, `public/maps/*.json`, `route.js`, `lane-layout.js`, `signals.js` or the road code in `world.js`. After changing lane logic, rebuild ALL maps (old map files draw no lines). Don't loosen its limits to make it pass; fix the data or the plan.
+- The check covers geometry, not looks. After road changes, also screenshot a few lane-count changes, two-way stretches and signals in the game, and run a real-click test: the game must still load and start.
 
 ## Road structures (rule: nothing raised on the driven road)
 
@@ -147,12 +150,22 @@ The owner switched computers mid-task. This section is the compressed history an
    - Sidewalk folds over the lanes on the ~5 m turn near the sherwood finish (s 22064–22194). The route itself turns that sharply; smoothing very sharp corners in the builder would fix it.
    - Side roads clip the underside of some real road bridges (home s 8174–8231; refinery s 1359–1810 and 11350–11424). Off the driven road.
 2. **Sound effects: done 2026-10-09, waiting for the owner to listen.** `src/sound.js` + `sound-studio.html` (see the code map). Tested: each event plays once, no audio-node leak over 2 minutes of busy driving, 60 fps on home and sherwood, no clipping or clicks in offline renders, works with Web Audio missing. Still to do: the owner auditions everything in `/sound-studio.html` and in a drive, then says what to change. Music stays on the wishlist.
-3. **Look at the road lines across all 8 maps.** `npm run check:roads` passes, and the owner's screenshot spot is fixed: 91 St SW at s ≈ 450, on every route that starts in Summerside. A full screenshot pass over every lane change, divided/undivided switch, centre turn lane and signal was started but never finished.
-4. **Lane-line follow-ups** (lower priority):
+3. **Road lines across all 8 maps: reviewed 2026-10-09** (about 265 spots screenshotted). The core rules held. Fixed after the review:
+   - signals at the wrong junction (lines ran through about a dozen intersections, a stop line mid-block, a missing signal on Terrace Rd);
+   - folded lines and a sidewalk across the lanes at the Sherwood finish U-turn;
+   - ramps painted with a neighbour's lane count;
+   - a 100 m dash gap around divided/undivided changes (now about 50 m);
+   - stub dashes.
+4. **Owner's choice (ask before doing):**
+   - Real Alberta divided roads and freeways have a **yellow left edge line** along the median. Not done, because yellow on one-way roads is exactly what upset the owner before.
+   - Residential collectors (88 St SW, Savaryn Dr, Rainbow Valley Rd) often have no edge lines or centre line in real life; `route.cls` could tone them down.
+5. **Lane-line follow-ups** (lower priority):
    - The kerb bulges a little where a divided road meets an undivided one.
-   - `turn:lanes` / `lanes:both_ways` aren't extracted, so turn bays are placed by rule.
+   - On two-way roads where the split flips (2+3 to 3+2, snowvalley 114 St s 2818–3240), both kerbs slide 3.5 m while the yellow stays put.
+   - `turn:lanes` / `lanes:both_ways` aren't extracted.
    - Lane-0 traffic glides 3.5 m when a two-way road adds a lane on the right.
    - Edge lines aren't broken at side-street mouths, only at signals.
+   - About 730 m of untagged Ellerslie Rd SW (windermere s 7528–8258) takes 1 lane from a short tagged piece; check against aerial photos.
 
 ### How the road-line fix works (2026-10-08)
 

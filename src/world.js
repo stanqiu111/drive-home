@@ -529,6 +529,7 @@ function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads)
   const walk = new MeshBuilder();
   const curb = new MeshBuilder();
   const nearStreet = sideStreetIndex(roads);
+  const selfNear = routeLookup(route);
   // Sidewalk on each side of each sample: city streets only, broken at intersections.
   const hasWalk = [new Uint8Array(route.n), new Uint8Array(route.n)];
   const tmpV = new THREE.Vector3();
@@ -537,7 +538,15 @@ function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads)
     const s = i * route.step;
     for (const [side, lat] of [[0, route.rightArr[i] + 0.5 + WALK_W / 2], [1, route.leftArr[i] - 0.5 - WALK_W / 2]]) {
       route.toWorld(s, lat, 0, tmpV);
-      hasWalk[side][i] = nearStreet(tmpV.x, tmpV.z, 2.5) ? 0 : 1;
+      // No sidewalk on the inside of a turn tighter than the road is wide: it would fold
+      // back across the lanes (same rule as the lane lines in lane-layout.js).
+      const outer = lat + Math.sign(lat) * WALK_W / 2;
+      // Nor where it would lie on another stretch of the route (a U-turn back alongside itself).
+      const other = selfNear(tmpV.x, tmpV.z, 15);
+      const onOther = other && Math.abs(other.i - i) > 4
+        && Math.abs(-(tmpV.x - route.x[other.i]) * route.tz[other.i] + (tmpV.z - route.z[other.i]) * route.tx[other.i])
+          < Math.max(route.rightArr[other.i], -route.leftArr[other.i]) + 0.3 + WALK_W / 2;
+      hasWalk[side][i] = nearStreet(tmpV.x, tmpV.z, 2.5) || outer * route.curv[i] > 0.7 || onOther ? 0 : 1;
     }
   }
   const deck = new MeshBuilder();

@@ -1,5 +1,5 @@
 const keys = new Set();
-const touch = { left: false, right: false, brake: false, nitro: false };
+const touch = { left: false, right: false, brake: false, nitro: false, horn: false };
 const BLOCK = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'];
 
 export const isTouch = window.matchMedia('(pointer: coarse)').matches;
@@ -31,5 +31,6 @@ export function readInput() {
   // On touch screens the car accelerates on its own unless braking.
   const gas = keys.has('ArrowUp') || keys.has('KeyW') || (isTouch && !brake);
   const nitro = keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('Space') || touch.nitro;
-  return { steer: (right ? 1 : 0) - (left ? 1 : 0), gas, brake, nitro };
+  const horn = keys.has('KeyH') || touch.horn;
+  return { steer: (right ? 1 : 0) - (left ? 1 : 0), gas, brake, nitro, horn };
 }

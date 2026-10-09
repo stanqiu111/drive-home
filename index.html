@@ -18,6 +18,7 @@
           <span id="home-icon">🏠</span>
         </div>
         <div class="pill" id="dist">0.00 km</div>
+        <button class="pill sound-btn" id="mute-hud" type="button"></button>
       </div>
       <div id="street"></div>
       <div id="landmark"></div>
@@ -45,6 +46,7 @@
         <button data-touch="right">▶</button>
       </div>
       <div class="group">
+        <button data-touch="horn" class="horn" aria-label="Horn">📯</button>
         <button data-touch="brake">BRAKE</button>
         <button data-touch="nitro" class="nitro">NITRO</button>
       </div>
@@ -75,11 +77,14 @@
             <span><kbd>↓</kbd> brake</span>
             <span><kbd>←</kbd><kbd>→</kbd> steer</span>
             <span><kbd>Shift</kbd> nitro</span>
+            <span><kbd>H</kbd> horn</span>
+            <span><kbd>M</kbd> sound</span>
             <span><b>?</b> boxes: 🛡️ 🚀 ✈️ 💥</span>
           </div>
           <div class="foot-row">
             <button class="go-btn">Start driving</button>
           </div>
+          <button class="sound-btn" id="mute-menu" type="button"></button>
         </div>
       </div>
     </div>

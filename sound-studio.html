@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sound Studio</title>
+<!-- Dev page: listen to every game sound. Open /sound-studio.html on the dev server.
+     Every sound is made live by src/sound.js (Web Audio, no files). "Check all sounds"
+     renders each one offline and reports peak level, loudness and clean starts/ends. -->
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 20px 16px 40px; background: #111522; color: #fff; font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; }
+  h1 { margin: 0 0 4px; font-size: 30px; }
+  h2 { margin: 26px 0 10px; font-size: 13px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.65; }
+  p.sub { margin: 0 0 8px; opacity: 0.75; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button, select { font: inherit; color: #fff; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.18); border-radius: 10px; padding: 8px 12px; cursor: pointer; }
+  button:hover { background: rgba(255,255,255,0.16); }
+  button.on { background: #ff8a3d; color: #1a1020; border-color: #ff8a3d; font-weight: 700; }
+  button.big { font-weight: 700; background: linear-gradient(90deg, #ffb347, #ff5e3a); color: #1a1020; border: 0; }
+  label { display: inline-flex; gap: 6px; align-items: center; }
+  input[type=range] { width: 220px; }
+  .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .grid button { text-align: left; }
+  .grid button small { display: block; opacity: 0.6; font-size: 12px; }
+  #status { font: 12px/1.5 ui-monospace, Menlo, monospace; opacity: 0.8; white-space: pre-wrap; margin-top: 10px; }
+  .gauges { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 10px; font-variant-numeric: tabular-nums; }
+  .gauges b { font-size: 26px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  td.bad { color: #ff7b7b; font-weight: 700; }
+  td.ok { color: #7dff9a; }
+  .bar { height: 8px; background: linear-gradient(90deg, #29b6ff, #ffb347); border-radius: 4px; }
+  #mute { font-size: 20px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>🔊 Sound Studio</h1>
+  <p class="sub">Every sound in Drive Home, made live in the browser. Click any button to hear it. Use headphones or speakers for the low engine sounds.</p>
+  <div class="row"><button id="mute"></button><span id="hint" class="sub"></span></div>
+
+  <h2>Engines</h2>
+  <div class="card">
+    <div class="row">
+      <label>Vehicle <select id="veh"></select></label>
+      <button id="eng">Engine on</button>
+      <button id="auto" class="big">▶ Test drive (0 → top speed, nitro, brake)</button>
+      <button id="hornBtn">📯 Horn (hold)</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <label>Speed <input id="spd" type="range" min="0" max="95" step="0.5" value="0" /></label>
+      <label>Gas <input id="thr" type="range" min="0" max="1" step="1" value="0" /></label>
+      <label><input id="racing" type="checkbox" checked /> in gear (off = revving on the start line)</label>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <label><input id="boost" type="checkbox" /> nitro</label>
+      <label><input id="turbo" type="checkbox" /> turbo power</label>
+      <label><input id="drift" type="checkbox" /> drifting</label>
+      <label><input id="brake" type="checkbox" /> braking</label>
+      <label><input id="fly" type="checkbox" /> flying</label>
+      <label><input id="air" type="checkbox" /> Rocket lift-off</label>
+    </div>
+    <div class="gauges"><span><b id="kmh">0</b> km/h</span><span>gear <b id="gear">1</b></span><span>rpm <b id="rpm">0</b>%</span><span>pitch <b id="hz">0</b> Hz</span></div>
+  </div>
+
+  <h2>Race</h2>
+  <div class="grid" id="race"></div>
+  <h2>Pick-ups and powers</h2>
+  <div class="grid" id="powers"></div>
+  <h2>Crashes and traffic</h2>
+  <div class="card">
+    <div class="row">
+      <label>Strength <input id="str" type="range" min="0" max="1" step="0.05" value="0.6" /></label>
+      <label>Side (left ↔ right) <input id="pan" type="range" min="-1" max="1" step="0.1" value="0" /></label>
+    </div>
+    <div class="grid" id="hits" style="margin-top:10px"></div>
+  </div>
+  <h2>Horns (hold the button)</h2>
+  <div class="grid" id="horns"></div>
+  <h2>Menu and rewards</h2>
+  <div class="grid" id="menu"></div>
+
+  <h2>Check all sounds</h2>
+  <div class="card">
+    <div class="row"><button id="check" class="big">Run the check</button><span class="sub">Renders each sound silently and measures it. Peak must stay below 0 dB (no distortion); starts and ends must be clean (no clicks).</span></div>
+    <div id="report" style="margin-top:12px"></div>
+  </div>
+  <div id="status"></div>
+</main>
+
+<script type="module">
+import { sound, soundLab } from '/src/sound.js';
+import { CAR_MODELS, CAR_IDS } from '/src/cars.js';
+import { FUN_RIDES, FUN_IDS } from '/src/funrides.js';
+
+const $ = (id) => document.getElementById(id);
+const VEH = [...CAR_IDS.map((id) => [id, CAR_MODELS[id].name, CAR_MODELS[id].stats]), ...FUN_IDS.map((id) => [id, FUN_RIDES[id].name, FUN_RIDES[id].stats])];
+$('veh').innerHTML = VEH.map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
+const statsOf = (id) => VEH.find((v) => v[0] === id)[2];
+const topOf = (id) => 45 * statsOf(id).top;
+
+sound.bindButton($('mute'));
+const hint = () => { $('hint').textContent = sound.muted ? 'Sound is off. Click the speaker to turn it on.' : ''; };
+$('mute').addEventListener('click', hint);
+hint();
+
+// ---------- engine ----------
+let engineOn = false;
+let auto = null; // test drive state
+const p = { active: false, racing: true, speed: 0, throttle: false, brake: false, boost: false, turbo: false, airborne: false, flying: false, drifting: false, top: 45 };
+function setVehicle() {
+  sound.setVehicle($('veh').value);
+  p.top = topOf($('veh').value);
+}
+$('veh').addEventListener('change', setVehicle);
+setVehicle();
+$('eng').addEventListener('click', () => {
+  engineOn = !engineOn;
+  $('eng').classList.toggle('on', engineOn);
+  $('eng').textContent = engineOn ? 'Engine off' : 'Engine on';
+  if (!engineOn) auto = null;
+});
+$('auto').addEventListener('click', () => {
+  engineOn = true;
+  $('eng').classList.add('on');
+  $('eng').textContent = 'Engine off';
+  auto = { t: 0, speed: 0 };
+  $('racing').checked = true;
+});
+
+const hold = (el, down, up) => {
+  el.addEventListener('pointerdown', (e) => { e.preventDefault(); down(); });
+  for (const ev of ['pointerup', 'pointerleave', 'pointercancel']) el.addEventListener(ev, up);
+};
+hold($('hornBtn'), () => sound.hornStart(), () => sound.hornStop());
+
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.05, (now - last) / 1000);
+  last = now;
+  if (auto) {
+    // The game's own driving numbers: full gas to top speed, 2 s of nitro, then brake.
+    const st = statsOf($('veh').value);
+    const top = 45 * st.top;
+    auto.t += dt;
+    const phase = auto.speed < top - 0.3 && auto.t < 14 ? 'gas' : auto.nitroT === undefined || auto.nitroT < 2 ? 'nitro' : auto.speed > 0.5 ? 'brake' : 'done';
+    let accel = (auto.speed < 20 ? 16 : 10) * st.accel;
+    let max = top;
+    if (phase === 'nitro') { auto.nitroT = (auto.nitroT ?? 0) + dt; accel += 22; max = top + 21; }
+    if (phase === 'brake') accel = -32;
+    auto.speed = Math.max(0, Math.min(Math.max(max, auto.speed - 25 * dt), auto.speed + accel * dt));
+    $('spd').value = auto.speed;
+    $('thr').value = phase === 'gas' || phase === 'nitro' ? 1 : 0;
+    $('boost').checked = phase === 'nitro';
+    $('brake').checked = phase === 'brake';
+    if (phase === 'done') auto = null;
+  }
+  Object.assign(p, {
+    active: engineOn, racing: $('racing').checked, speed: Number($('spd').value), throttle: $('thr').value === '1',
+    brake: $('brake').checked, boost: $('boost').checked, turbo: $('turbo').checked, airborne: $('air').checked,
+    flying: $('fly').checked, drifting: $('drift').checked,
+  });
+  sound.update(dt, p);
+  const d = sound.debug;
+  $('kmh').textContent = Math.round(p.speed * 3.6);
+  if (d.engine) {
+    $('gear').textContent = d.engine.voice === 'ice' ? d.engine.gear : '–';
+    $('rpm').textContent = Math.round(d.engine.rpm * 100);
+    $('hz').textContent = Math.round(d.engine.freq);
+  }
+  $('status').textContent = `audio: ${d.state}${d.muted ? ' (muted)' : ''} · playing one-shots: ${d.voices} · played: ${Object.entries(d.counts).map(([k, v]) => `${k} ${v}`).join(', ')}${d.errors.length ? `\nerrors: ${d.errors.join('; ')}` : ''}`;
+}
+requestAnimationFrame(frame);
+
+// ---------- one-shot buttons ----------
+const opts = () => ({ strength: Number($('str').value), pan: Number($('pan').value) });
+function buttons(el, list) {
+  el.innerHTML = list.map(([id, label, note]) => `<button data-id="${id}">${label}<small>${note}</small></button>`).join('');
+  el.addEventListener('click', (e) => {
+    const id = e.target.closest('[data-id]')?.dataset.id;
+    if (!id) return;
+    if (id === 'countdown') {
+      ['beep', 'beep', 'beep', 'go'].forEach((n, i) => setTimeout(() => sound.play(n), i * 1000));
+      return;
+    }
+    sound.play(id, opts());
+  });
+}
+buttons($('race'), [
+  ['countdown', '3 · 2 · 1 · GO', 'the start of a race'],
+  ['beep', 'Beep', 'one countdown beep'],
+  ['go', 'GO!', 'race starts'],
+  ['finish', 'Finish fanfare', 'crossing the line'],
+  ['record', 'New best time', 'on the result card'],
+]);
+buttons($('powers'), [
+  ['nitro', 'Nitro whoosh', 'pressing nitro'],
+  ['can', 'Nitro can', 'picking one up'],
+  ['box', '? box', 'opening a box'],
+  ['shield', 'Shield', 'power from a box'],
+  ['turbo', 'Turbo', 'power from a box'],
+  ['fly', 'Fly', 'power from a box'],
+  ['blast', 'Blast', 'power from a box'],
+  ['liftoff', 'Rocket lift-off', 'above 250 km/h'],
+]);
+buttons($('hits'), [
+  ['crash', 'Crash', 'hitting a car (strength slider)'],
+  ['smash', 'Smash', 'Rocket / shield / turbo ploughing through'],
+  ['passby', 'Close pass', 'a car whooshing by (side slider)'],
+]);
+buttons($('menu'), [
+  ['click', 'Menu click', 'any menu button'],
+  ['achievement', 'Achievement', 'a new medal'],
+  ['unlock', 'Rocket unlocked', 'all achievements done'],
+]);
+// Horns: one button per vehicle, held like the H key.
+$('horns').innerHTML = VEH.map(([id, name]) => `<button data-horn="${id}">${name}<small>${soundLab.HORNS[id][0]} horn</small></button>`).join('');
+$('horns').querySelectorAll('[data-horn]').forEach((b) => hold(b, () => {
+  sound.setVehicle(b.dataset.horn);
+  sound.hornStart();
+}, () => { sound.hornStop(); sound.setVehicle($('veh').value); }));
+
+// ---------- offline check ----------
+const SR = 44100;
+const db = (x) => (x > 0 ? 20 * Math.log10(x) : -Infinity);
+const fmt = (x) => (Number.isFinite(x) ? x.toFixed(1) : '−∞');
+
+function measure(buf, t0, tEnd) {
+  const L = buf.getChannelData(0);
+  const R = buf.numberOfChannels > 1 ? buf.getChannelData(1) : L;
+  const n = L.length;
+  let peak = 0;
+  for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
+  // Loudness: the loudest 400 ms window (RMS of both channels).
+  const win = Math.floor(SR * 0.4);
+  const hop = Math.floor(SR * 0.05);
+  let loud = 0;
+  for (let s = 0; s + win <= n || s === 0; s += hop) {
+    let sum = 0;
+    const e = Math.min(n, s + win);
+    for (let i = s; i < e; i++) sum += L[i] * L[i] + R[i] * R[i];
+    loud = Math.max(loud, Math.sqrt(sum / (2 * win)));
+    if (e === n) break;
+  }
+  // Clean start: silent before t0 and no instant jump in the first 0.5 ms.
+  const i0 = Math.floor(t0 * SR);
+  let before = 0;
+  for (let i = 0; i < i0; i++) before = Math.max(before, Math.abs(L[i]), Math.abs(R[i]));
+  let first = 0;
+  for (let i = i0; i < Math.min(n, i0 + SR * 0.0005); i++) first = Math.max(first, Math.abs(L[i]), Math.abs(R[i]));
+  // Clean end: everything after the sound's end time is silent.
+  let after = 0;
+  if (tEnd !== undefined) for (let i = Math.min(n, Math.ceil(tEnd * SR)); i < n; i++) after = Math.max(after, Math.abs(L[i]), Math.abs(R[i]));
+  // Biggest sample-to-sample jump compared with the peak (a click shows up as a big jump).
+  return { peak: db(peak), loud: db(loud), startOk: before === 0 && first <= Math.max(0.3 * peak, 1e-4), endOk: tEnd === undefined || after < 1e-4, len: tEnd };
+}
+
+async function renderOneShot(name, o) {
+  const secs = 3;
+  const ctx = new OfflineAudioContext(2, SR * secs, SR);
+  const bufs = soundLab.buffersFor(ctx);
+  const bus = soundLab.buildMaster(ctx, soundLab.MASTER_VOL, false);
+  const v = new soundLab.Voice(ctx, soundLab.UI_SOUNDS.has(name) ? bus.ui : bus.sfx, bufs);
+  const t0 = 0.05;
+  const end = soundLab.SFX[name](v, t0, o);
+  const buf = await ctx.startRendering();
+  return measure(buf, t0, end + 0.001);
+}
+
+async function renderHorn(id) {
+  const ctx = new OfflineAudioContext(2, SR * 2, SR);
+  const bufs = soundLab.buffersFor(ctx);
+  const bus = soundLab.buildMaster(ctx, soundLab.MASTER_VOL, false);
+  const [kind, f] = soundLab.HORNS[id];
+  const v = new soundLab.Voice(ctx, bus.sfx, bufs);
+  const t0 = 0.05;
+  let end;
+  if (soundLab.SFX[kind]) end = soundLab.SFX[kind](v, t0, {});
+  else end = soundLab.HELD[kind](v, t0, f).release(t0 + 0.6);
+  const buf = await ctx.startRendering();
+  return measure(buf, t0, end + 0.001);
+}
+
+// Engine in a few situations, using the game's own acceleration numbers.
+async function renderEngine(id, mode) {
+  const st = statsOf(id);
+  const top = 45 * st.top;
+  const secs = mode === 'drive' ? 10 : 2.5;
+  const ctx = new OfflineAudioContext(2, SR * secs, SR);
+  const bufs = soundLab.buffersFor(ctx);
+  const bus = soundLab.buildMaster(ctx, soundLab.MASTER_VOL, false);
+  const rig = new soundLab.Rig(ctx, bus.drive, bufs);
+  rig.setVehicle(id);
+  const q = { active: true, racing: true, speed: 0, throttle: false, brake: false, boost: false, turbo: false, airborne: false, flying: false, drifting: false, top };
+  let speed = mode === 'cruise' ? top : 0;
+  let shifts = 0;
+  let gear = 0;
+  for (let i = 0; i < secs * 60; i++) {
+    const t = i / 60;
+    if (mode === 'drive') {
+      q.throttle = true;
+      speed = Math.min(top, speed + (speed < 20 ? 16 : 10) * st.accel / 60);
+    }
+    q.speed = speed;
+    rig.update(1 / 60, q, t);
+    if (rig.gear > gear) shifts++;
+    gear = rig.gear;
+  }
+  const buf = await ctx.startRendering();
+  return { ...measure(buf, 0, undefined), shifts, gears: gear + 1, voice: rig.state.voice };
+}
+
+async function renderAmbience(what) {
+  const ctx = new OfflineAudioContext(2, SR * 2, SR);
+  const bufs = soundLab.buffersFor(ctx);
+  const bus = soundLab.buildMaster(ctx, soundLab.MASTER_VOL, false);
+  const rig = new soundLab.Rig(ctx, bus.drive, bufs);
+  rig.setVehicle('crv');
+  rig.engineBus.disconnect(); // just the layer itself, no engine
+  const q = { active: true, racing: true, speed: 45, throttle: false, brake: what === 'squeal (braking)', boost: what === 'nitro hiss', turbo: false, airborne: false, flying: false, drifting: false, top: 45 };
+  for (let i = 0; i < 120; i++) rig.update(1 / 60, q, i / 60);
+  const buf = await ctx.startRendering();
+  return measure(buf, 0, undefined);
+}
+
+async function checkAll() {
+  const rows = [];
+  const S = [['click'], ['beep'], ['go'], ['nitro'], ['can'], ['box'], ['shield'], ['turbo'], ['fly'], ['blast'],
+    ['crash', { strength: 0.2 }, 'crash (light)'], ['crash', { strength: 1, pan: 0.5 }, 'crash (hard)'], ['smash', { strength: 1 }],
+    ['passby', { strength: 1, pan: -1 }], ['liftoff'], ['finish'], ['record'], ['achievement'], ['unlock']];
+  for (const [name, o = {}, label = name] of S) rows.push({ group: 'effect', name: label, ...(await renderOneShot(name, o)) });
+  for (const [id, name] of VEH) rows.push({ group: 'horn', name, ...(await renderHorn(id)) });
+  for (const [id, name] of VEH) {
+    for (const mode of ['idle', 'drive', 'cruise']) rows.push({ group: `engine ${mode}`, name, ...(await renderEngine(id, mode)) });
+  }
+  for (const w of ['wind', 'squeal (braking)', 'nitro hiss']) rows.push({ group: 'driving', name: `${w} at 160 km/h`, ...(await renderAmbience(w)) });
+  return rows;
+}
+
+$('check').addEventListener('click', async () => {
+  $('report').textContent = 'Rendering…';
+  const rows = await checkAll();
+  window.checkRows = rows;
+  $('report').innerHTML = `<table><tr><th>What</th><th>Sound</th><th>Peak dB</th><th>Loudness dB</th><th></th><th>Start</th><th>End</th><th>Notes</th></tr>${rows.map((r) => `<tr>
+    <td>${r.group}</td><td>${r.name}</td>
+    <td class="${r.peak < -0.5 ? 'ok' : 'bad'}">${fmt(r.peak)}</td><td>${fmt(r.loud)}</td>
+    <td style="width:120px"><div class="bar" style="width:${Math.max(2, (r.loud + 60) * 2)}px"></div></td>
+    <td class="${r.startOk ? 'ok' : 'bad'}">${r.startOk ? 'clean' : 'CLICK'}</td><td class="${r.endOk ? 'ok' : 'bad'}">${r.endOk ? 'clean' : 'CUT'}</td>
+    <td>${r.voice === 'ice' && r.group === 'engine drive' ? `${r.shifts} gear changes` : ''}</td></tr>`).join('')}</table>`;
+});
+window.checkAll = checkAll;
+window.sound = sound;
+window.studioReady = true;
+</script>
+</body>
+</html>

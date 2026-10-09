@@ -118,6 +118,7 @@ kbd {
 #touch button.nitro { background: rgba(41,182,255,0.4); font-size: 14px; }
 #touch button[data-touch="brake"] { font-size: 14px; }
 #touch button.on { background: rgba(255,255,255,0.45); }
+#touch button.horn { width: 56px; height: 56px; align-self: center; font-size: 24px; }
 @media (pointer: coarse) {
   #speedo { bottom: 110px; }
 }
@@ -164,7 +165,7 @@ kbd {
 .card.menu { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .menu-body { overflow-y: auto; padding: 22px 24px 12px; min-height: 0; }
 .menu-foot {
-  flex: none; padding: 10px 24px 16px; border-top: 1px solid rgba(255,255,255,0.1);
+  position: relative; flex: none; padding: 10px 24px 16px; border-top: 1px solid rgba(255,255,255,0.1);
   background: rgba(10, 13, 26, 0.75);
 }
 .menu-foot .controls { margin: 0 0 10px; font-size: 12px; }
@@ -315,3 +316,12 @@ h2.group span { font-size: 11px; letter-spacing: 0; text-transform: none; opacit
   #route-detail { display: none; }
   .detail.inline { display: block; }
 }
+
+/* Sound on/off */
+.sound-btn { border: 0; cursor: pointer; color: #fff; font: inherit; line-height: 1; }
+#mute-hud { padding: 7px 11px; font-size: 16px; }
+#mute-menu {
+  position: absolute; right: 18px; bottom: 16px; width: 46px; height: 46px; border-radius: 50%;
+  background: rgba(255,255,255,0.1); font-size: 20px;
+}
+#mute-menu:hover { background: rgba(255,255,255,0.18); }

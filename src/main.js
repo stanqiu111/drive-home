@@ -13,6 +13,7 @@ import { Effects } from './effects.js';
 import { Ending } from './ending.js';
 import { buildFun, FUN_RIDES, FUN_IDS } from './funrides.js';
 import { readInput, setupTouch, isTouch } from './input.js';
+import { sound } from './sound.js';
 
 // Game-side flavour per map. Names, distances and route facts come from maps/index.json,
 // which tools/build-maps.mjs writes.
@@ -175,6 +176,7 @@ function selectCar(id) {
   }
   prefs.car = id;
   savePrefs();
+  sound.setVehicle(id);
   stats = model.stats;
   if (player) scene.remove(player);
   player = FUN_RIDES[id] ? buildFun(model.spec) : makeCar(id, prefs.colors[id] ?? model.color);
@@ -399,21 +401,22 @@ function renderAchievements() {
     : `${done}/${ACHIEVEMENTS.length} done · finish them all to unlock the 🚀 Rocket${progress.online ? '' : ' · saved on this device'}`;
 }
 
-// Achievement pop-ups, one after another.
+// Achievement pop-ups, one after another, each with its chime.
 const achQueue = [];
 let achBusy = false;
-function popAchievement(text) {
-  achQueue.push(text);
+function popAchievement(text, sfx = 'achievement') {
+  achQueue.push([text, sfx]);
   if (achBusy) return;
   achBusy = true;
   const next = () => {
-    const t = achQueue.shift();
-    if (!t) {
+    const item = achQueue.shift();
+    if (!item) {
       achBusy = false;
       return;
     }
-    $('achieve').textContent = t;
+    $('achieve').textContent = item[0];
     $('achieve').classList.add('show');
+    sound.play(item[1]);
     setTimeout(() => {
       $('achieve').classList.remove('show');
       setTimeout(next, 350);
@@ -423,7 +426,7 @@ function popAchievement(text) {
 }
 progress.onChange((fresh) => {
   for (const a of fresh) popAchievement(`🏅 ${a.icon} ${a.name}!`);
-  if (fresh.length && progress.rocketUnlocked) popAchievement('🚀 ROCKET UNLOCKED! Pick it in the garage');
+  if (fresh.length && progress.rocketUnlocked) popAchievement('🚀 ROCKET UNLOCKED! Pick it in the garage', 'unlock');
   if (S.mode === 'menu') renderMenu();
 });
 
@@ -478,6 +481,7 @@ function startRace() {
   ui.finish.classList.remove('show');
   S.mode = 'countdown';
   S.countdown = 3;
+  beepAt = 0;
   snapCamera = true;
 }
 
@@ -495,13 +499,17 @@ function finish() {
   setBanner(false); // already driven under it; it would block the ending shot
   progress.finishTrip(prefs.map);
   ending.start();
+  sound.play('finish');
 }
 
 function showResult() {
   const id = prefs.map;
   const best = loadBest(id);
   const isRecord = best === null || S.time < best;
-  if (isRecord) saveBest(id, S.time);
+  if (isRecord) {
+    saveBest(id, S.time);
+    sound.play('record');
+  }
   const realMin = Math.round(route.length / RUSH_HOUR_SPEED / 60);
   ui.result.innerHTML = `
     <p class="big">${fmt(S.time)}</p>
@@ -603,14 +611,26 @@ window.addEventListener('keydown', (e) => {
   if (e.target instanceof HTMLInputElement) return;
   if (e.code === 'Enter' && (S.mode === 'menu' || S.mode === 'finished')) startRace();
   if (e.code === 'Escape' && S.mode === 'finished') showMenu();
+  if (e.code === 'KeyM' && !e.repeat) {
+    const muted = sound.toggleMute();
+    if (S.mode === 'race' || S.mode === 'countdown') toast(muted ? '🔇 Sound off' : '🔊 Sound on', 'power');
+  }
 });
 setupTouch(ui.touch);
+// Sound: on/off buttons (HUD and menu) and a soft click on every menu button.
+sound.bindButton($('mute-hud'));
+sound.bindButton($('mute-menu'));
+document.addEventListener('click', (e) => {
+  const el = e.target.closest?.('button, summary');
+  if (el && !el.closest('#touch')) sound.play('click');
+});
 
 // --- Powers ---
 function activatePower(kind) {
   S.power = kind;
   S.powerTime = POWERS[kind].duration;
   toast(`${POWERS[kind].icon} ${POWERS[kind].label}!`, 'power');
+  sound.play(kind);
   if (kind === 'blast') blast();
 }
 
@@ -694,7 +714,10 @@ function drive(dt, input) {
   spinWheels(player, ds);
   // The Rocket lifts off at high speed and lands again when it slows down.
   const airborne = modelOf(prefs.car).liftoff && S.speed > LIFTOFF_SPEED;
-  if (airborne && !S.airborne) toast('🚀 LIFT OFF!', 'power');
+  if (airborne && !S.airborne) {
+    toast('🚀 LIFT OFF!', 'power');
+    sound.play('liftoff');
+  }
   S.airborne = airborne;
   S.y += ((S.power === 'fly' || airborne ? FLY_HEIGHT : 0) - S.y) * Math.min(1, dt * 3);
 }
@@ -711,11 +734,16 @@ function checkCollisions() {
     if (S.power === 'shield' || S.power === 'turbo' || modelOf(prefs.car).smasher) {
       smash(c);
       S.shake = Math.max(S.shake, 0.3);
+      sound.play('smash', { strength: clamp(S.speed / 50, 0.3, 1) });
       continue;
     }
     if (S.invuln > 0) return;
 
-    if (Math.abs(ds) > (S.len + c.len) * 0.3) {
+    // How hard it hit: closing speed for bumps from behind or ahead, a share of speed for side swipes.
+    const endOn = Math.abs(ds) > (S.len + c.len) * 0.3;
+    const impact = endOn ? Math.abs(S.speed - c.speed) : S.speed * 0.5;
+    sound.play('crash', { strength: clamp(impact / 25 + 0.1, 0.15, 1), pan: clamp((c.lat - S.x) / 2, -1, 1) });
+    if (endOn) {
       if (ds < 0) {
         // Rear-ended the car ahead.
         S.s = c.s - (S.len + c.len) / 2;
@@ -845,6 +873,60 @@ function updateHud(dt) {
   }
 }
 
+// --- Sound ---
+let beepAt = 0; // countdown number that last beeped
+let hornHeld = false;
+// Reused every frame so the sound update allocates nothing.
+const soundIn = { active: false, racing: false, speed: 0, throttle: false, brake: false, boost: false, turbo: false, airborne: false, flying: false, drifting: false, top: 45 };
+
+function updateSound(dt, input) {
+  const active = S.mode === 'countdown' || S.mode === 'race';
+  const racing = S.mode === 'race';
+  const turbo = racing && S.power === 'turbo';
+  soundIn.active = active;
+  soundIn.racing = racing;
+  soundIn.speed = S.speed;
+  // Touch screens accelerate on their own, so only rev on the start line from a real key.
+  soundIn.throttle = racing ? input.gas || S.boosting || turbo : active && input.gas && !isTouch;
+  soundIn.brake = racing && input.brake;
+  soundIn.boost = racing && S.boosting;
+  soundIn.turbo = turbo;
+  soundIn.airborne = racing && Boolean(S.airborne);
+  soundIn.flying = S.y > 1.5;
+  soundIn.drifting = racing && S.drifting;
+  soundIn.top = BASE_SPEED * stats.top;
+  sound.update(dt, soundIn);
+  // Horn (H key or the touch button) while driving.
+  const horn = active && input.horn;
+  if (horn !== hornHeld) {
+    hornHeld = horn;
+    if (horn) sound.hornStart();
+    else sound.hornStop();
+  }
+}
+
+// A short whoosh when a car goes by close and fast, panned to its side.
+const passPrev = new Float32Array(traffic.cars.length).fill(NaN);
+function checkPassBy() {
+  const cars = traffic.cars;
+  for (let i = 0; i < cars.length; i++) {
+    const c = cars[i];
+    if (!c.active || c.flying) {
+      passPrev[i] = NaN;
+      continue;
+    }
+    const ds = c.s - S.s; // > 0: ahead of the player
+    const prev = passPrev[i];
+    passPrev[i] = ds;
+    const crossed = (prev > 0 && ds <= 0) || (prev < 0 && ds >= 0);
+    if (!crossed || Math.abs(ds - prev) > 12) continue; // respawned, not passed
+    const dx = c.lat - S.x;
+    const rel = Math.abs(S.speed - c.speed);
+    if (Math.abs(dx) > 5 || rel < 6 || S.speed < 12 || S.y > 2) continue;
+    sound.play('passby', { pan: clamp(dx / 4, -1, 1), strength: clamp(rel / 30, 0.3, 1) });
+  }
+}
+
 // --- Main loop ---
 let t = 0;
 let last = performance.now();
@@ -862,9 +944,15 @@ function frame(now) {
 
   if (S.mode === 'countdown') {
     S.countdown -= dt;
+    const n = Math.ceil(S.countdown);
+    if (n > 0 && n !== beepAt) {
+      beepAt = n;
+      sound.play('beep');
+    }
     if (S.countdown <= 0) {
       S.mode = 'race';
       toast('GO!', 'go');
+      sound.play('go');
     }
   } else if (S.mode === 'race') {
     S.time += dt;
@@ -879,12 +967,15 @@ function frame(now) {
   const boxes = mysteryBoxes.update(dt, t, S);
   if (S.mode === 'race') {
     checkCollisions();
+    checkPassBy();
     if (cans) {
       S.nitro = Math.min(1, S.nitro + 0.35 * cans);
       toast('+NITRO', 'nitro');
+      sound.play('can');
       progress.add('cans', cans);
     }
     if (boxes) {
+      sound.play('box');
       activatePower(randomPower());
       progress.add('boxes', boxes);
     }
@@ -903,6 +994,7 @@ function frame(now) {
   }
   updateFx(t);
   updateHud(dt);
+  updateSound(dt, input);
   if (devCam) {
     camera.position.set(...devCam.pos);
     camera.lookAt(...devCam.look);
@@ -921,7 +1013,7 @@ window.addEventListener('resize', () => {
 // Test hook for automated checks; only exists in the dev server.
 if (import.meta.env.DEV) {
   window.__game = {
-    S, activatePower, finish, startRace, selectMap, selectCar, progress,
+    S, activatePower, finish, startRace, selectMap, selectCar, progress, sound, traffic, nitroCans, mysteryBoxes,
     get route() { return route; },
     get world() { return world; },
     set orbit(a) { orbitAngle = a; },

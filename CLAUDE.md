@@ -36,7 +36,7 @@ npm run preview    # serve the production build
   - `MAPS` = `public/maps/index.json` (written by the builder: km, route polyline, street list, lights, curves, bridge/highway metres, climb, landmarks) merged with `MAP_INFO` (destination label, 2-sentence description, cheer, ending theme). Add new maps to `MAP_INFO` and to `NEW_MAPS` for the "New" badge.
   - The map-select screen groups routes by start point (`GROUPS`), draws north-up route maps as inline SVG, difficulty stars and badges from the index facts, and a detail panel with description, rush-hour race bar and online rank.
   - HUD landmark callouts come from `data.landmarks` in each map file.
-  - A dev-only hook, `window.__game`, exposes `S`, `route`, `world`, `startRace`, `finish`, `selectMap`, `selectCar`, `activatePower`, `progress`, `orbit` and `cam` (`{pos, look, fov}` free camera, `null` to release) for automated checks.
+  - A dev-only hook, `window.__game`, exposes `S`, `route`, `world`, `startRace`, `finish`, `selectMap`, `selectCar`, `activatePower`, `progress`, `traffic`, `nitroCans`, `mysteryBoxes`, `sound`, `orbit` and `cam` (`{pos, look, fov}` free camera, `null` to release) for automated checks. `sound.debug` gives the sound event counters, engine state (gear, rpm, pitch) and mute state.
 - `route.js`: works in route space.
   - `s` = metres along the route; `lat` = sideways offset (+ = right). Convert with `toWorld(s, lat, h)`.
   - Models face -z, and `yaw = atan2(-tx, -tz)`.
@@ -63,6 +63,11 @@ npm run preview    # serve the production build
 - `powers.js`: the ? boxes (shield, turbo, fly, blast). Turbo comes up twice as often.
 - `ending.js`: per-map finish cutscene. Only `home` ends with video games; the others are burger, noodles, beach, shopping and BBQ.
 - `progress.js`: achievements and per-player stats.
+- `sound.js`: every sound, made live with Web Audio (oscillators, filtered noise, envelopes): no audio files, nothing fetched.
+  - `sound.play(name, opts)` for one-shots (crash, smash, nitro, can, box, the four power stingers, beep/go, finish, record, achievement, unlock, passby, liftoff, click); `sound.update(dt, p)` every frame for the engine, wind, tyre squeal and nitro hiss; `hornStart/hornStop` (H key, touch 📯 button); `setMuted`/`toggleMute` (M key, 🔊 buttons on the HUD and menu, saved as `driveHome.muted`).
+  - Engines per vehicle (`ENGINES`): five combustion presets with a simulated 7-gear box (the Legacy has a boxer burble), an electric whine (Model X, E-bike), freewheel ticks (Bicycle, E-bike coasting), the Rocket's roar that swells at lift-off, and fun-ride voices (Poutine kazoo kart, Oilers organ hover, Rogers Place chug). Horns per vehicle in `HORNS`.
+  - The AudioContext starts on the first click or key, suspends while muted or the tab is hidden, and nothing throws without Web Audio. Event counters tick even when muted, for tests.
+- `sound-studio.html` (dev page, `/sound-studio.html`): buttons for every sound, hold-to-honk horns, an engine panel (vehicle, speed, gas, nitro, drift…) with a test drive, and "Run the check", which renders each sound offline and reports peak, loudness and clean starts/ends. Use it after changing sounds.
 - `leaderboard.js`, `supabase.js`: online features.
 
 ## Map data (`tools/build-maps.mjs`)
@@ -129,7 +134,7 @@ The owner switched computers mid-task. This section is the compressed history an
 ### Where things are
 
 - **Live** (`main`, last deploy `dcaca2c`): 8 maps, landmarks, the map-select screen, building styles, store and exit signs, overpasses, online leaderboard and achievements.
-- **Branch `wip/road-lines-and-sound`** (not live, waiting for the owner's OK). It holds the road-line fix, the road-structure fix (2026-10-09), the check in `npm run build`, these notes and `tools/dev/shots.mjs`. To go live once the owner approves: merge into `main` and push.
+- **Branch `wip/road-lines-and-sound`** (not live, waiting for the owner's OK). It holds the road-line fix, the road-structure fix and the sound effects (2026-10-09), the check in `npm run build`, these notes and `tools/dev/shots.mjs`. To go live once the owner approves: merge into `main` and push.
 
 ### Owner to-dos
 
@@ -141,13 +146,7 @@ The owner switched computers mid-task. This section is the compressed history an
 1. **Things on the driven road:** done 2026-10-09 (see "Road structures"). Left, cosmetic:
    - Sidewalk folds over the lanes on the ~5 m turn near the sherwood finish (s 22064–22194). The route itself turns that sharply; smoothing very sharp corners in the builder would fix it.
    - Side roads clip the underside of some real road bridges (home s 8174–8231; refinery s 1359–1810 and 11350–11424). Off the driven road.
-2. **Sound effects** (owner asked 2026-10-08; nothing built yet). Build them procedurally with Web Audio in `src/sound.js`: no files, no network.
-   - Engine per vehicle with gear shifts: Subaru boxer rumble, Kia van, electric whine for the Model X and Cam's E-bike, freewheel ticking for the Bicycle, a Rocket roar that grows at lift-off, playful sounds for the fun rides.
-   - Effects: nitro whoosh, tyre squeal, wind, strength-aware crash, a different smash for the Rocket/shield, chimes for nitro cans and ? boxes plus a stinger per power, 3-2-1-GO, finish fanfare, achievement chime, pass-by whoosh, soft UI clicks.
-   - Horn on H (a bell on bikes), with a horn button on touch screens.
-   - Mute: M key and a 🔊 button, remembered across visits. Start audio on the first gesture.
-   - Add a dev page `sound-studio.html` so the owner can audition every sound before approving.
-   - Then test it (events fire once, no node leaks, 60 fps, no clipping) and review the mix. Music stays on the wishlist.
+2. **Sound effects: done 2026-10-09, waiting for the owner to listen.** `src/sound.js` + `sound-studio.html` (see the code map). Tested: each event plays once, no audio-node leak over 2 minutes of busy driving, 60 fps on home and sherwood, no clipping or clicks in offline renders, works with Web Audio missing. Still to do: the owner auditions everything in `/sound-studio.html` and in a drive, then says what to change. Music stays on the wishlist.
 3. **Look at the road lines across all 8 maps.** `npm run check:roads` passes, and the owner's screenshot spot is fixed: 91 St SW at s ≈ 450, on every route that starts in Summerside. A full screenshot pass over every lane change, divided/undivided switch, centre turn lane and signal was started but never finished.
 4. **Lane-line follow-ups** (lower priority):
    - The kerb bulges a little where a divided road meets an undivided one.
@@ -185,4 +184,4 @@ The owner reported a double yellow appearing in the middle of a one-way road (91
 
 ## Wishlist (not done yet)
 
-Engine and horn sounds plus music (sound effects are to-do 2 above), police chasing speeders, buses and trucks, rain or night driving, house styles by era (bungalows vs two-storeys with front garages), LRT trains beside 114 St / 111 St.
+Music (sound effects are done, see `sound.js`), police chasing speeders, buses and trucks, rain or night driving, house styles by era (bungalows vs two-storeys with front garages), LRT trains beside 114 St / 111 St.

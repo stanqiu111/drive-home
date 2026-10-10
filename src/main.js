@@ -13,7 +13,7 @@ import { Effects } from './effects.js';
 import { Ending } from './ending.js';
 import { buildFun, FUN_RIDES, FUN_IDS } from './funrides.js';
 import { readInput, setupTouch, isTouch } from './input.js';
-import { sound } from './sound.js';
+import { sound, SOUND_CREDITS } from './sound.js';
 
 // Game-side flavour per map. Names, distances and route facts come from maps/index.json,
 // which tools/build-maps.mjs writes.
@@ -217,7 +217,7 @@ async function selectMap(id) {
     nitroCans.setRoute(route);
     mysteryBoxes.setRoute(route);
     ending.setRoute(route, world.heightAt, mapInfo().cheer, mapInfo().ending);
-    ui.credits.textContent = data.credits;
+    ui.credits.textContent = `${data.credits} · ${SOUND_CREDITS}`;
     S.landmarks = (data.landmarks || []).map((l) => ({ ...l, shown: false }));
     reset();
     S.mode = 'menu';

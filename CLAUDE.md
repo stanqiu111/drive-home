@@ -11,7 +11,7 @@ Three.js + Vite, plain JavaScript ES modules, no framework.
 - The owner is not a programmer. Do the work end to end, check it yourself (screenshots, test drives), and explain results simply.
 - **No paid APIs.** No API keys and no Claude/Anthropic API calls from the game. Free data and free tiers only.
 - **Privacy:** never put the owner's real home or start address in code, map data, UI or commits. On purpose, the routes start at a public spot on 91 St SW (Summerside) and the Downtown map ends by the Alberta Legislature.
-- Keep the data attribution credits in the menu (OpenStreetMap, City of Edmonton, NRCan).
+- Keep the data attribution credits in the menu (OpenStreetMap, City of Edmonton, NRCan) and the sound credits (`SOUND_CREDITS` in `sound.js`).
 - "Cam" is a teammate. The E-bike is Cam's; the plain Bicycle belongs to no one.
 - The owner cares a lot that each car looks like its real model. After changing a car, render it from several angles and compare.
 - Pushing to `main` deploys to production automatically (Vercel is connected to GitHub). **Never push to `main` (or deploy live) until the owner says so.** Finish and check work locally, show the owner, then ask. Work in progress goes on a branch. After an approved push, confirm with `npx vercel ls drive-home`.
@@ -36,7 +36,7 @@ npm run preview    # serve the production build
   - `MAPS` = `public/maps/index.json` (written by the builder: km, route polyline, street list, lights, curves, bridge/highway metres, climb, landmarks) merged with `MAP_INFO` (destination label, 2-sentence description, cheer, ending theme). Add new maps to `MAP_INFO` and to `NEW_MAPS` for the "New" badge.
   - The map-select screen groups routes by start point (`GROUPS`), draws north-up route maps as inline SVG, difficulty stars and badges from the index facts, and a detail panel with description, rush-hour race bar and online rank.
   - HUD landmark callouts come from `data.landmarks` in each map file.
-  - A dev-only hook, `window.__game`, exposes `S`, `route`, `world`, `startRace`, `finish`, `selectMap`, `selectCar`, `activatePower`, `progress`, `traffic`, `nitroCans`, `mysteryBoxes`, `sound`, `orbit` and `cam` (`{pos, look, fov}` free camera, `null` to release) for automated checks. `sound.debug` gives the sound event counters, engine state (gear, rpm, pitch) and mute state.
+  - A dev-only hook, `window.__game`, exposes `S`, `route`, `world`, `startRace`, `finish`, `selectMap`, `selectCar`, `activatePower`, `progress`, `traffic`, `nitroCans`, `mysteryBoxes`, `sound`, `orbit` and `cam` (`{pos, look, fov}` free camera, `null` to release) for automated checks. `sound.debug` gives the sound event counters, engine state (gear, rpm, pitch, `source`: recorded or synth), the recordings' load state (`samples`) and mute state.
 - `route.js`: works in route space.
   - `s` = metres along the route; `lat` = sideways offset (+ = right). Convert with `toWorld(s, lat, h)`.
   - Models face -z, and `yaw = atan2(-tx, -tz)`.
@@ -63,11 +63,13 @@ npm run preview    # serve the production build
 - `powers.js`: the ? boxes (shield, turbo, fly, blast). Turbo comes up twice as often.
 - `ending.js`: per-map finish cutscene. Only `home` ends with video games; the others are burger, noodles, beach, shopping and BBQ.
 - `progress.js`: achievements and per-player stats.
-- `sound.js`: every sound, made live with Web Audio (oscillators, filtered noise, envelopes): no audio files, nothing fetched.
-  - `sound.play(name, opts)` for one-shots (crash, smash, nitro, can, box, the four power stingers, beep/go, finish, record, achievement, unlock, passby, liftoff, click); `sound.update(dt, p)` every frame for the engine, wind, tyre squeal and nitro hiss; `hornStart/hornStop` (H key, touch 📯 button); `setMuted`/`toggleMute` (M key, 🔊 buttons on the HUD and menu, saved as `driveHome.muted`).
-  - Engines per vehicle (`ENGINES`): five combustion presets with a simulated 7-gear box (the Legacy has a boxer burble), an electric whine (Model X, E-bike), freewheel ticks (Bicycle, E-bike coasting), the Rocket's roar that swells at lift-off, and fun-ride voices (Poutine kazoo kart, Oilers organ hover, Rogers Place chug). Horns per vehicle in `HORNS`.
+- `sound.js`: every sound, with Web Audio. Car engines, the turbo whistle and blow-off, tyre squeal, the Model X drive sound, the E-bike motor and the Rocket roar are **real recordings** (see "Sounds"); everything else is made live (oscillators, filtered noise, envelopes).
+  - `sound.play(name, opts)` for one-shots (crash, smash, nitro, can, box, the four power stingers, beep/go, finish, record, achievement, unlock, passby, liftoff, blowoff, click); `sound.update(dt, p)` every frame for the engine, wind, tyre squeal and turbo whistle; `hornStart/hornStop` (H key, touch 📯 button); `setMuted`/`toggleMute` (M key, 🔊 buttons on the HUD and menu, saved as `driveHome.muted`).
+  - Engines per vehicle (`ENGINES`), all driven by a simulated 7-gear box. Each car's `rec` picks its recorded engine (`pack`: `i4` inline four for the CR-V and Accord, `b4` boxer for the Legacy, `i6` straight six for the IS 300 and, muffled, the Carnival), its rpm range, tone (low-pass, EQ), level and factory turbo whistle. `RecEngineVoice` works like racing games: steady-rpm loops recorded on throttle and off it, each pitched around the rpm it was recorded at and crossfaded by rpm and throttle; an upshift briefly lifts the throttle. Nitro or the turbo power spool up a real turbo whistle; letting go plays the blow-off. The Model X layers a real Tesla drive recording under a soft whine, the E-bike a real brushless motor, the Rocket a jet afterburner. The Bicycle and the fun rides (Poutine kazoo kart, Oilers organ hover, Rogers Place chug) stay synthesised. Horns per vehicle in `HORNS`.
+  - The recordings load in the background after the first click or key (`Samples`, four files, about 370 KB). Until they arrive, or if they fail, every voice uses the old synthesised one (`IceVoice` etc.), so the game never waits for audio. `sound.useRecordings = false` forces the synth (the studio's compare switch).
   - The AudioContext starts on the first click or key, suspends while muted or the tab is hidden, and nothing throws without Web Audio. Event counters tick even when muted, for tests.
-- `sound-studio.html` (dev page, `/sound-studio.html`): buttons for every sound, hold-to-honk horns, an engine panel (vehicle, speed, gas, nitro, drift…) with a test drive, and "Run the check", which renders each sound offline and reports peak, loudness and clean starts/ends. Use it after changing sounds.
+- `sound-samples.js`: generated list of where each recorded loop sits in `public/sounds/*.m4a`, its rpm and length. Don't edit by hand (see "Sounds").
+- `sound-studio.html` (dev page, `/sound-studio.html`): buttons for every sound, hold-to-honk horns, an engine panel (vehicle, speed, gas, nitro, drift…) with a **Recorded / Synth** switch, a scripted test drive (idle, revs, full throttle through the gears, nitro, lift off with blow-off, drift, braking), turbo-spool and squeal buttons, and "Run the check", which renders each sound offline and reports peak, loudness, clean starts/ends, clean loop seams and smooth rpm crossfades. Use it after changing sounds.
 - `leaderboard.js`, `supabase.js`: online features.
 
 ## Map data (`tools/build-maps.mjs`)
@@ -84,6 +86,29 @@ npm run preview    # serve the production build
 - Building classes come from OSM tags, then City of Edmonton zoning polygons (`fixa-tstc`, cached per map), then OSM land use, then size. Footprints under a landmark's `excludeR` are dropped. Named buildings keep their OSM name (`n`) for signs.
 - **Adding a map:** add it to `MAPS` in `tools/build-maps.mjs` and to `MAP_INFO` in `src/main.js`, rebuild, then add its id to BOTH `map in (...)` checks in `supabase/schema.sql` and re-run the SQL; otherwise posting times on that map fails.
 - **Adding a landmark:** add an entry to `src/landmark-list.js`, write `src/landmarks/<id>.js`, check it with `landmark-studio.html`, then rebuild the maps so footprints under it are dropped and the route callout is written.
+
+## Sounds (`tools/sounds/build-sounds.mjs`)
+
+The owner asked for real engine sounds ("turbo speed sound is not real, find a real engine source sound"), so engines and car effects are cut from real recordings.
+
+- Every recording is **CC0** (public domain) on Freesound.org and is fetched as Freesound's public preview MP3 (no account, no key). No credit is required; the menu credits them anyway (`SOUND_CREDITS`).
+- Run `node tools/sounds/build-sounds.mjs` (macOS: it uses `/usr/bin/afconvert` to decode MP3 and encode AAC). It downloads the sources into `tools/cache/sounds/` (gitignored) and writes `public/sounds/engine-i4.m4a`, `engine-boxer.m4a`, `engine-six.m4a`, `effects.m4a` (AAC, 32 kHz mono, 96 kbps, about 370 KB together) and `src/sound-samples.js`. All of those are committed. A rebuild from the same sources gives the same audio (only the files' timestamps change), so commit new sound files only when the sources or cuts changed.
+- How a loop is made: `trackCycle()` follows the engine cycle (two crank turns) through the recording, `flatten()` resamples a stretch of an rpm sweep to one steady rpm, `evenOut()` removes slow level swings so the loop doesn't pulse, and `makeLoop()` crossfades whole engine cycles into the start so there is no seam. In the file each loop has a copy of its end before it and its start after it, so the game loops cleanly from `at` to `at + len` (`sound-samples.js`).
+- **Replacing or adding a sample:** add the recording to `SOURCES` in `tools/sounds/sources.mjs` (CC0 only; anything else needs the owner's OK and a credit), then add a loop to a pack in `PACKS` (`t` = centre time in seconds, `rpm` = rough rpm there, `cycles` = about 0.3–1 s worth, `load` = on or off throttle) or an item to `FX`, and run the tool. Its log prints each loop's measured rpm and a seam score (a click would show near 0). Then open `/sound-studio.html`, run the check (seams, crossfades, peaks) and listen to the test drive. A new engine type also needs an entry in `ENGINE_SETS` and a `rec.pack` in `ENGINES` (`sound.js`).
+
+| Used for | Recording | Author | License |
+|---|---|---|---|
+| Inline four (CR-V, Accord): Mercedes-Benz 190E 2.3-16V on a dyno, exhaust mic | [19_2500_D6](https://freesound.org/people/Chippy569/sounds/162509/), [17_ShortSweep_D6](https://freesound.org/people/Chippy569/sounds/162501/), [20_6500_D6](https://freesound.org/people/Chippy569/sounds/162512/), [21_500_D6](https://freesound.org/people/Chippy569/sounds/162515/), [21_2500_D6](https://freesound.org/people/Chippy569/sounds/162518/), [17_MedSweep_D6](https://freesound.org/people/Chippy569/sounds/162504/), [21_6500_D6](https://freesound.org/people/Chippy569/sounds/162521/) | Chippy569 | CC0 |
+| Boxer four (Legacy): Scion FR-S (Subaru FA20) dyno pull | [DynoJet Scion FR-S](https://freesound.org/people/dezoris/sounds/183654/) | dezoris | CC0 |
+| Boxer idle (Legacy): 2003 Subaru Impreza WRX | [WRX - Exhaust sounds](https://freesound.org/people/ulose2piranha/sounds/273334/) | ulose2piranha | CC0 |
+| Straight six (IS 300, Carnival) and the turbo whistle: Toyota Supra 2JZ on a dyno | [Import car revs on Chassis Dyno with Turbo](https://freesound.org/people/editboy23/sounds/496171/) | editboy23 | CC0 |
+| Tyre squeal | [Chrysler LHS tire squeal 04](https://freesound.org/people/audible-edge/sounds/71739/) | audible-edge | CC0 |
+| Rocket roar: turbojet afterburner | [Afterburner](https://freesound.org/people/TiesWijnen/sounds/413312/) | TiesWijnen | CC0 |
+| Model X drive sound: Tesla Model S Plaid, full throttle | [Acceleration of an electric car](https://freesound.org/people/justVova/sounds/761685/) | justVova | CC0 |
+| E-bike motor: brushless drill motor | [DeWalt 18V Cordless Combi Drill](https://freesound.org/people/megashroom/sounds/390162/) | megashroom | CC0 |
+| Blow-off valve and nitro burst: compressed-air line released | [release_air_pffft](https://freesound.org/people/reg7783/sounds/131302/) | reg7783 | CC0 |
+
+- Not found as CC0 and therefore not used: a clean V6 (the six is a straight six, which shares the V6's firing rhythm), a real blow-off valve (a compressed-air release stands in) and a clean electric-motor whine (the Model X whine stays synthesised, quietly, over the real Tesla recording).
 
 ## Road lines (rule: don't break them again)
 
@@ -151,7 +176,7 @@ The owner switched computers mid-task. This section is the compressed history an
 1. **Things on the driven road:** done 2026-10-09 (see "Road structures"). Left, cosmetic:
    - Sidewalk folds over the lanes on the ~5 m turn near the sherwood finish (s 22064–22194). The route itself turns that sharply; smoothing very sharp corners in the builder would fix it.
    - Side roads clip the underside of some real road bridges (home s 8174–8231; refinery s 1359–1810 and 11350–11424). Off the driven road.
-2. **Sound effects: done 2026-10-09, waiting for the owner to listen.** `src/sound.js` + `sound-studio.html` (see the code map). Tested: each event plays once, no audio-node leak over 2 minutes of busy driving, 60 fps on home and sherwood, no clipping or clicks in offline renders, works with Web Audio missing. Still to do: the owner auditions everything in `/sound-studio.html` and in a drive, then says what to change. Music stays on the wishlist.
+2. **Sound effects: done 2026-10-09; real engine recordings added 2026-10-10 (branch, not live), waiting for the owner to listen.** `src/sound.js` + `sound-studio.html` (see the code map and "Sounds"). After the owner said the turbo speed sound wasn't real, engines, the turbo whistle and blow-off, tyre squeal, the Model X, E-bike and Rocket use CC0 recordings, with the synth as fallback. Tested: samples load after the first click and the engine switches to them, the game runs normally with the sound files blocked, loop seams and rpm crossfades are clean in offline renders, no clipping, no audio-node leak over 2 minutes of busy driving, 60 fps on home and sherwood. Still to do: the owner auditions everything in `/sound-studio.html` (Recorded vs Synth, test drive) and in a drive, then says what to change. Music stays on the wishlist.
 3. **Road lines across all 8 maps: reviewed 2026-10-09** (about 265 spots screenshotted). The core rules held. Fixed after the review:
    - signals at the wrong junction (lines ran through about a dozen intersections, a stop line mid-block, a missing signal on Terrace Rd);
    - folded lines and a sidewalk across the lanes at the Sherwood finish U-turn;

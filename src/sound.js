@@ -1,17 +1,29 @@
-// Procedural sound for Drive Home. Every sound is synthesised with the Web Audio API
-// (oscillators, filtered noise, envelopes and a few generated buffers): no audio files,
-// nothing is fetched.
+// Sound for Drive Home, made with the Web Audio API.
+//
+// Engines, the turbo whistle and blow-off, tyre squeal, the Tesla's drive sound, the E-bike
+// motor and the Rocket's roar are real recordings (public/sounds/*.m4a, built by
+// tools/sounds/build-sounds.mjs, listed in src/sound-samples.js). Combustion engines work the
+// way racing games build them: steady-rpm loops recorded on and off throttle, each pitched
+// around its own rpm and crossfaded by the simulated gearbox's rpm and the throttle. The
+// files load after the first click or key; until then, or if they fail, every voice falls
+// back to the synthesised one below, so the game never waits for audio. Everything else
+// (event sounds, horns, wind, fun rides) is synthesised: oscillators, filtered noise, envelopes.
 //
 //   sound.play(name, opts)      one-shot effects, see SFX below (e.g. play('crash', { strength: 0.8 }))
-//   sound.update(dt, p)         once per frame: engine, wind, tyre squeal, nitro hiss, nitro whoosh
+//   sound.update(dt, p)         once per frame: engine, wind, tyre squeal, turbo whistle, nitro whoosh
 //   sound.setVehicle(id)        engine voice and horn for a car or ride id (cars.js / funrides.js)
 //   sound.hornStart() / hornStop()
 //   sound.setMuted(bool) / toggleMute() / bindButton(el) / muted
+//   sound.useRecordings         false = synthesised engines only (sound studio comparison)
 //
 // The AudioContext is created on the first user gesture, suspended while the tab is hidden
 // or the sound is muted, and nothing throws if Web Audio is missing. Event counters
 // (sound.counts) always tick, even without audio, so tests can check the wiring.
+import { SAMPLE_PACKS } from './sound-samples.js';
 
+const SAMPLE_URL = `${import.meta.env?.BASE_URL ?? '/'}sounds/`;
+// Shown in the menu credits. Every recording is CC0 (tools/sounds/sources.mjs lists them).
+export const SOUND_CREDITS = 'Engine, turbo and tyre sounds: recordings by Chippy569, dezoris, ulose2piranha, editboy23, audible-edge, TiesWijnen, justVova, megashroom and reg7783 on Freesound.org (CC0)';
 const MASTER_VOL = 0.6;
 const MUTE_KEY = 'driveHome.muted';
 const MAX_VOICES = 14; // simultaneous one-shots
@@ -20,6 +32,10 @@ const UI_VOL = 0.55;
 const WIND_VOL = 1.2;
 const SQUEAL_VOL = 0.5;
 const HISS_VOL = 0.4;
+const REC_ENGINE_VOL = 3.2; // recorded engine loops are mastered at -18 dB RMS
+const REC_SQUEAL_VOL = 0.4;
+const WHISTLE_VOL = 0.4;
+const BLOWOFF_VOL = 0.7;
 // Gear tops as a share of the car's top speed: 7 gears so nitro and turbo still have room.
 const GEAR_TOP = [0.24, 0.4, 0.58, 0.8, 1.08, 1.45, 2.1];
 
@@ -139,6 +155,7 @@ class Voice {
   constructor(ctx, dest, bufs, level = 1) {
     this.ctx = ctx;
     this.bufs = bufs;
+    this.rec = null; // Samples, for one-shots that use a recording
     this.nodes = [];
     this.srcs = [];
     this.out = this.gain(level);
@@ -198,6 +215,29 @@ class Voice {
     return this.add(n);
   }
 
+  // A recorded loop (s = samples.get(...)), starting at a random point inside it.
+  loop(s, t, rate = 1) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = s.buf;
+    src.loop = true;
+    src.loopStart = s.item.at;
+    src.loopEnd = s.item.at + s.item.len;
+    src.playbackRate.value = rate;
+    src.start(t, s.item.at + Math.random() * s.item.len * 0.9);
+    this.srcs.push(src);
+    return this.add(src);
+  }
+
+  // A recorded one-shot, played once from its place in the pack.
+  shot(s, t, rate = 1) {
+    const src = this.ctx.createBufferSource();
+    src.buffer = s.buf;
+    src.playbackRate.value = rate;
+    src.start(t, s.item.at, s.item.len);
+    this.srcs.push(src);
+    return this.add(src);
+  }
+
   dispose() {
     for (const s of this.srcs) {
       try { s.stop(); } catch { /* already stopped */ }
@@ -207,6 +247,64 @@ class Voice {
     }
     this.srcs.length = 0;
     this.nodes.length = 0;
+  }
+}
+
+// ---------- recorded samples ----------
+// Fetches and decodes the sample packs (one AAC file each, see sound-samples.js) once the
+// AudioContext exists. A pack that fails stays missing and its voices keep the synthesised
+// sound; nothing waits for this.
+const ITEMS = Object.fromEntries(Object.entries(SAMPLE_PACKS).map(([k, p]) => [k, Object.fromEntries(p.items.map((it) => [it.id, it]))]));
+
+function decode(ctx, data) {
+  return new Promise((resolve, reject) => {
+    const p = ctx.decodeAudioData(data, resolve, reject);
+    if (p && p.then) p.then(resolve, reject);
+  });
+}
+
+class Samples {
+  constructor() {
+    this.buffers = Object.create(null);
+    this.failed = Object.create(null);
+    this.state = 'not loaded';
+    this.ms = 0;
+    this.promise = null;
+    this.onPack = noop; // called with the pack id when one is ready
+  }
+
+  load(ctx) {
+    if (this.promise) return this.promise;
+    this.state = 'loading';
+    const t0 = performance.now();
+    const ids = Object.keys(SAMPLE_PACKS);
+    this.promise = Promise.all(ids.map(async (id) => {
+      try {
+        const res = await fetch(SAMPLE_URL + SAMPLE_PACKS[id].file);
+        if (!res.ok) throw new Error(`${SAMPLE_PACKS[id].file}: HTTP ${res.status}`);
+        this.buffers[id] = await decode(ctx, await res.arrayBuffer());
+      } catch (e) {
+        this.failed[id] = String(e?.message ?? e);
+        return;
+      }
+      try { this.onPack(id); } catch (e) { this.failed[`${id} (voice)`] = String(e?.message ?? e); }
+    })).then(() => {
+      const ok = Object.keys(this.buffers).length;
+      this.state = ok === ids.length ? 'ready' : ok ? 'partial' : 'failed';
+      this.ms = Math.round(performance.now() - t0);
+    });
+    return this.promise;
+  }
+
+  // { buf, item } for a pack's item, or null while it is missing.
+  get(pack, id) {
+    const buf = this.buffers[pack];
+    const item = ITEMS[pack]?.[id];
+    return buf && item ? { buf, item } : null;
+  }
+
+  get debug() {
+    return { state: this.state, loaded: Object.keys(this.buffers), failed: { ...this.failed }, ms: this.ms };
   }
 }
 
@@ -283,14 +381,20 @@ const SFX = {
     return t + 0.75;
   },
 
-  // Nitro: a rising whoosh with a soft thump underneath.
+  // Nitro: a burst of gas (a real compressed-air recording once loaded) over a rising whoosh
+  // and a soft thump.
   nitro(v, t) {
-    const bp = burst(v, v.out, 'pink', t, 0.85, 0.07, 0.06, 0.45, 'bandpass', 380, 1.3);
+    const air = v.rec?.get('fx', 'blowoff');
+    if (air) {
+      const g = v.gain(0.75);
+      v.shot(air, t, 1.15).connect(v.filter('highpass', 350)).connect(g).connect(v.out);
+    }
+    const bp = burst(v, v.out, 'pink', t, air ? 0.3 : 0.85, 0.07, 0.06, 0.45, 'bandpass', 380, 1.3);
     bp.frequency.setValueAtTime(380, t);
     bp.frequency.exponentialRampToValueAtTime(2600, t + 0.3);
     bp.frequency.exponentialRampToValueAtTime(1300, t + 0.6);
     kick(v, v.out, t, 110, 48, 0.45, 0.22);
-    return t + 0.65;
+    return t + (air ? 0.82 : 0.65);
   },
 
   // Nitro can: two bright rising chime notes.
@@ -323,16 +427,29 @@ const SFX = {
     return t + 0.95;
   },
 
+  // Turbo power: a real turbo whistle spooling up fast (synthesised sweep before the
+  // recordings load), a rush of air and a thump.
   turbo(v, t) {
-    const o = v.osc('sawtooth', 110, t, t + 0.8);
-    o.frequency.setValueAtTime(110, t);
-    o.frequency.exponentialRampToValueAtTime(520, t + 0.45);
-    const lp = v.filter('lowpass', 600, 2);
-    lp.frequency.setValueAtTime(600, t);
-    lp.frequency.exponentialRampToValueAtTime(4200, t + 0.45);
-    const g = v.gain();
-    env(g.gain, t, 0.22, 0.02, 0.28, 0.35);
-    o.connect(lp).connect(g).connect(v.out);
+    const w = v.rec?.get('fx', 'whistle');
+    if (w) {
+      const src = v.loop(w, t, 0.45);
+      src.playbackRate.setValueAtTime(0.45, t);
+      src.playbackRate.exponentialRampToValueAtTime(1.05, t + 0.5);
+      src.stop(t + 0.85);
+      const g = v.gain();
+      env(g.gain, t, 0.45, 0.05, 0.4, 0.3);
+      src.connect(g).connect(v.out);
+    } else {
+      const o = v.osc('sawtooth', 110, t, t + 0.8);
+      o.frequency.setValueAtTime(110, t);
+      o.frequency.exponentialRampToValueAtTime(520, t + 0.45);
+      const lp = v.filter('lowpass', 600, 2);
+      lp.frequency.setValueAtTime(600, t);
+      lp.frequency.exponentialRampToValueAtTime(4200, t + 0.45);
+      const g = v.gain();
+      env(g.gain, t, 0.22, 0.02, 0.28, 0.35);
+      o.connect(lp).connect(g).connect(v.out);
+    }
     const bp = burst(v, v.out, 'pink', t, 0.5, 0.05, 0.2, 0.35, 'bandpass', 500, 1.1);
     bp.frequency.setValueAtTime(500, t);
     bp.frequency.exponentialRampToValueAtTime(3000, t + 0.45);
@@ -488,6 +605,22 @@ const SFX = {
     return t + 0.9;
   },
 
+  // Turbo blow-off valve venting as the boost ends (a real compressed-air recording once
+  // loaded, a filtered hiss before).
+  blowoff(v, t, o) {
+    const s = clamp(o.strength ?? 0.8, 0.2, 1);
+    const air = v.rec?.get('fx', 'blowoff');
+    if (air) {
+      const g = v.gain(BLOWOFF_VOL * s);
+      v.shot(air, t, rand(0.92, 1.04)).connect(g).connect(v.out);
+      return t + 1.0;
+    }
+    const bp = burst(v, v.out, 'white', t, 0.8 * s, 0.008, 0.08, 0.3, 'bandpass', 3200, 0.8);
+    bp.frequency.setValueAtTime(3200, t);
+    bp.frequency.exponentialRampToValueAtTime(1400, t + 0.38);
+    return t + 0.45;
+  },
+
   // Clown bulb horn (the Poutine): honk-honk.
   clown(v, t) {
     for (const at of [0, 0.2]) {
@@ -511,7 +644,7 @@ const SFX = {
 // Low-priority sounds are dropped when too many are playing; these never are.
 const PRIORITY = new Set(['beep', 'go', 'finish', 'record', 'achievement', 'unlock']);
 // Minimum gap between two of the same sound (seconds), so a pile-up isn't a wall of noise.
-const GAP = { click: 0.03, passby: 0.12, crash: 0.12, smash: 0.05, can: 0.06, box: 0.1 };
+const GAP = { click: 0.03, passby: 0.12, crash: 0.12, smash: 0.05, can: 0.06, box: 0.1, blowoff: 0.6 };
 const STINGERS = new Set(['shield', 'turbo', 'fly', 'blast']);
 const UI_SOUNDS = new Set(['click']);
 
@@ -582,26 +715,171 @@ const HELD = {
 };
 
 // ---------- engines ----------
-// Combustion presets: idle/red = firing pitch (Hz) at idle and redline, harm = pitch ratio of
-// the second oscillator (2 for an inline four, 1.5 for a V6), mix = [saw, square, sub],
-// bright = filter opening per Hz, drive = saturation, boxer = Subaru rumble depth,
-// dip = level during a gear change (lower = sharper shift).
+// Synthesised combustion presets (the fallback): idle/red = firing pitch (Hz) at idle and
+// redline, harm = pitch ratio of the second oscillator (2 for an inline four, 1.5 for a V6),
+// mix = [saw, square, sub], bright = filter opening per Hz, drive = saturation, boxer = Subaru
+// rumble depth, dip = level during a gear change (lower = sharper shift).
+// rec = the recorded engine, used once its samples have loaded:
+//   pack = engine recordings (see ENGINE_SETS), idle/red = rpm range the gearbox drives,
+//   lp = tone (low-pass Hz), body/presence = EQ in dB at 180 Hz / 2.5 kHz,
+//   turbo = factory turbo whistle on full throttle (0 = none), vol = level.
+// Electric and Rocket rec: bed/motor/roar = recorded loop, whine = level of the synthesised
+// whine on top (0..1), fk = whine Hz per m/s.
 const ENGINES = {
-  crv: { voice: 'ice', idle: 32, red: 150, harm: 2, mix: [0.6, 0.26, 0.35], noise: 0.1, bright: 5, q: 1.2, drive: 1.6, boxer: 0, dip: 0.55, vol: 1 },
-  accord: { voice: 'ice', idle: 34, red: 168, harm: 2, mix: [0.62, 0.3, 0.3], noise: 0.1, bright: 6, q: 1.8, drive: 2, boxer: 0, dip: 0.5, vol: 1 },
-  is300: { voice: 'ice', idle: 37, red: 190, harm: 1.5, mix: [0.6, 0.38, 0.3], noise: 0.12, bright: 6.5, q: 3, drive: 2.6, boxer: 0, dip: 0.45, vol: 0.95 },
-  legacy: { voice: 'ice', idle: 28, red: 140, harm: 2, mix: [0.6, 0.25, 0.45], noise: 0.12, bright: 4.5, q: 1.4, drive: 2, boxer: 0.75, dip: 0.5, vol: 1.05 },
-  carnival: { voice: 'ice', idle: 30, red: 128, harm: 1.5, mix: [0.55, 0.25, 0.35], noise: 0.08, bright: 3.5, q: 0.8, drive: 1.2, boxer: 0, dip: 0.8, vol: 0.9 },
-  modelx: { voice: 'ev', f0: 70, fk: 24, cut: 2800, buzz: false, vol: 0.9 },
-  ebike: { voice: 'ev', f0: 210, fk: 30, cut: 1800, buzz: true, ticks: true, vol: 0.7 },
+  crv: { voice: 'ice', idle: 32, red: 150, harm: 2, mix: [0.6, 0.26, 0.35], noise: 0.1, bright: 5, q: 1.2, drive: 1.6, boxer: 0, dip: 0.55, vol: 1,
+    rec: { pack: 'i4', idle: 850, red: 6500, lp: 4800, body: 2, presence: -2, turbo: 0.35, vol: 1 } },
+  accord: { voice: 'ice', idle: 34, red: 168, harm: 2, mix: [0.62, 0.3, 0.3], noise: 0.1, bright: 6, q: 1.8, drive: 2, boxer: 0, dip: 0.5, vol: 1,
+    rec: { pack: 'i4', idle: 850, red: 6900, lp: 8500, body: 0, presence: 2.5, turbo: 0.3, vol: 1.05 } },
+  is300: { voice: 'ice', idle: 37, red: 190, harm: 1.5, mix: [0.6, 0.38, 0.3], noise: 0.12, bright: 6.5, q: 3, drive: 2.6, boxer: 0, dip: 0.45, vol: 0.95,
+    rec: { pack: 'i6', idle: 700, red: 7000, lp: 7500, body: 1.5, presence: 1.5, turbo: 0, vol: 1 } },
+  legacy: { voice: 'ice', idle: 28, red: 140, harm: 2, mix: [0.6, 0.25, 0.45], noise: 0.12, bright: 4.5, q: 1.4, drive: 2, boxer: 0.75, dip: 0.5, vol: 1.05,
+    rec: { pack: 'b4', idle: 720, red: 6400, lp: 6500, body: 2.5, presence: 0, turbo: 0, vol: 1.05 } },
+  carnival: { voice: 'ice', idle: 30, red: 128, harm: 1.5, mix: [0.55, 0.25, 0.35], noise: 0.08, bright: 3.5, q: 0.8, drive: 1.2, boxer: 0, dip: 0.8, vol: 0.9,
+    rec: { pack: 'i6', idle: 650, red: 6000, lp: 2400, body: 3, presence: -4, turbo: 0, vol: 0.85 } },
+  modelx: { voice: 'ev', f0: 70, fk: 24, cut: 2800, buzz: false, vol: 0.9, rec: { bed: 'ev', whine: 0.3, fk: 12 } },
+  ebike: { voice: 'ev', f0: 210, fk: 30, cut: 1800, buzz: true, ticks: true, vol: 0.7, rec: { motor: 'ebike', whine: 0 } },
   bike: { voice: 'bike' },
-  rocket: { voice: 'rocket', vol: 1.5 },
+  rocket: { voice: 'rocket', vol: 1.5, rec: { roar: 'rocket' } },
   poutine: { voice: 'kart', vol: 1.2 },
   oilers: { voice: 'hover', vol: 0.8 },
   rogers: { voice: 'chug', vol: 1 },
 };
 const NO_TYRES = new Set(['oilers', 'rocket']);
 const BIKES = new Set(['bike', 'ebike']);
+
+// Recorded engine types: which pack holds the loops. A set without "off" (lifted throttle)
+// loops plays its "on" loops through a low-pass (offLp Hz) when the throttle is up. `idle`
+// can borrow another pack's idle with an rpm scale: a four at 1000 rpm fires as often as a
+// six at 670 rpm, so it passes for one.
+const ENGINE_SETS = {
+  i4: { pack: 'i4' }, // Mercedes 190E 2.3-16V inline four on a dyno
+  b4: { pack: 'b4', offLp: 1300 }, // Subaru flat four: FR-S dyno pull, WRX idle
+  i6: { pack: 'i6', idle: ['i4', 'idle', 4 / 6], offLp: 1300 }, // Supra 2JZ straight six
+};
+const XF_WIDTH = 0.7; // share of the rpm gap between two loops where both play
+
+// Equal-power crossfade between the two loops either side of rpm (lanes sorted by rpm).
+// Near its own rpm each loop plays alone. Writes lane.w; allocates nothing.
+function xfade(lanes, rpm) {
+  const n = lanes.length;
+  for (let i = 0; i < n; i++) lanes[i].w = 0;
+  if (rpm <= lanes[0].rpm) {
+    lanes[0].w = 1;
+    return;
+  }
+  if (rpm >= lanes[n - 1].rpm) {
+    lanes[n - 1].w = 1;
+    return;
+  }
+  let i = 0;
+  while (rpm >= lanes[i + 1].rpm) i++;
+  const x = Math.log(rpm / lanes[i].rpm) / Math.log(lanes[i + 1].rpm / lanes[i].rpm);
+  const u = clamp((x - 0.5) / XF_WIDTH + 0.5, 0, 1);
+  lanes[i].w = Math.cos((Math.PI / 2) * u);
+  lanes[i + 1].w = Math.sin((Math.PI / 2) * u);
+}
+
+// Recorded combustion engine: steady-rpm loops on throttle ("on") and off it ("off"), each
+// pitched to the gearbox rpm around the rpm it was recorded at, crossfaded by rpm and by
+// throttle, then shaped per car (low-pass, EQ, level).
+class RecEngineVoice {
+  // True once every pack the engine needs has loaded (its own and any borrowed idle).
+  static can(pr, samples) {
+    const set = pr.rec?.pack && ENGINE_SETS[pr.rec.pack];
+    return Boolean(set && samples?.buffers[set.pack] && (!set.idle || samples.buffers[set.idle[0]]));
+  }
+
+  constructor(v, pr, samples) {
+    const t = v.ctx.currentTime;
+    const rec = (this.rec = pr.rec);
+    this.recorded = true;
+    const set = ENGINE_SETS[rec.pack];
+    const items = SAMPLE_PACKS[set.pack].items;
+    this.lp = v.filter('lowpass', rec.lp, 0.7);
+    const body = v.filter('lowshelf', 180);
+    body.gain.value = rec.body;
+    const presence = v.filter('peaking', 2500, 0.9);
+    presence.gain.value = rec.presence;
+    this.dip = v.gain(1);
+    this.level = v.gain(0);
+    this.lp.connect(body).connect(presence).connect(this.dip).connect(this.level).connect(v.out);
+    this.onBus = v.gain(0);
+    this.offBus = v.gain(0);
+    this.onBus.connect(this.lp);
+    const offItems = items.filter((it) => it.load === 'off' && it.id !== 'idle');
+    if (offItems.length) this.offBus.connect(this.lp);
+    else this.offBus.connect(v.filter('lowpass', set.offLp, 0.6)).connect(this.lp);
+    // One looping source per recording; a source can feed both the on and the off bus.
+    this.srcs = [];
+    const source = (s, rpm) => {
+      const layer = { src: v.loop(s, t), rpm, w: 0, was: 1 };
+      this.srcs.push(layer);
+      return layer;
+    };
+    const lane = (layer, bus, list) => {
+      const g = v.gain(0);
+      layer.src.connect(g).connect(bus);
+      list.push({ layer, g, rpm: layer.rpm, w: 0 });
+    };
+    const [idlePack, idleId, idleScale] = set.idle ?? [set.pack, 'idle', 1];
+    const idleS = samples.get(idlePack, idleId);
+    const idle = idleS ? source(idleS, idleS.item.rpm * idleScale) : null;
+    const onLayers = items.filter((it) => it.load === 'on').map((it) => source(samples.get(set.pack, it.id), it.rpm));
+    const offLayers = offItems.length ? offItems.map((it) => source(samples.get(set.pack, it.id), it.rpm)) : onLayers;
+    this.on = [];
+    this.off = [];
+    if (idle) {
+      lane(idle, this.onBus, this.on);
+      lane(idle, this.offBus, this.off);
+    }
+    for (const l of onLayers) lane(l, this.onBus, this.on);
+    for (const l of offLayers) lane(l, this.offBus, this.off);
+    this.on.sort((a, b) => a.rpm - b.rpm);
+    this.off.sort((a, b) => a.rpm - b.rpm);
+    this.shiftAt = -9;
+  }
+
+  set(r, p, t) {
+    const rec = this.rec;
+    const n = Math.min(r.rpm, 0.97);
+    const rpm = rec.idle + (rec.red - rec.idle) * n;
+    // During an upshift the driver is off the throttle for a moment.
+    const lift = clamp(1 - (t - this.shiftAt) / 0.22, 0, 1);
+    const load = r.thr * (1 - 0.9 * lift);
+    const a = (Math.PI / 2) * load;
+    ramp(this.onBus.gain, Math.sin(a), t, 0.03);
+    ramp(this.offBus.gain, Math.cos(a), t, 0.03);
+    xfade(this.on, rpm);
+    xfade(this.off, rpm);
+    const srcs = this.srcs;
+    for (let i = 0; i < srcs.length; i++) srcs[i].w = 0;
+    for (let k = 0; k < 2; k++) {
+      const lanes = k ? this.off : this.on;
+      for (let i = 0; i < lanes.length; i++) {
+        const l = lanes[i];
+        ramp(l.g.gain, l.w, t, 0.03);
+        if (l.w > l.layer.w) l.layer.w = l.w;
+      }
+    }
+    // Pitch: only loops that are (or just were) audible need to follow.
+    for (let i = 0; i < srcs.length; i++) {
+      const s = srcs[i];
+      if (s.w > 0 || s.was > 0) ramp(s.src.playbackRate, clamp(rpm / s.rpm, 0.35, 2.5), t, 0.025);
+      s.was = s.w;
+    }
+    const lvl = REC_ENGINE_VOL * rec.vol * (0.4 + 0.6 * n) * (0.68 + 0.32 * load);
+    ramp(this.level.gain, lvl, t, 0.05);
+    r.state.freq = rpm;
+    r.state.level = lvl;
+  }
+
+  shift(t) {
+    this.shiftAt = t;
+    const g = this.dip.gain;
+    g.setTargetAtTime(0.72, t, 0.015);
+    g.setTargetAtTime(1, t + 0.08, 0.06);
+  }
+}
 
 class IceVoice {
   constructor(v, pr) {
@@ -682,11 +960,19 @@ class Ticker {
   }
 }
 
-// Electric: motor whine that rises with speed (Model X, Cam's E-bike).
+// Electric: motor whine that rises with speed (Model X, Cam's E-bike). With its recordings
+// loaded, the Model X also plays a real Tesla's drive sound (motors, tyres, road) and keeps
+// only a soft whine on top; the E-bike's whine becomes a real brushless motor.
 class EvVoice {
-  constructor(v, pr) {
+  constructor(v, pr, samples) {
     const t = v.ctx.currentTime;
     this.pr = pr;
+    const rec = pr.rec;
+    const bed = rec?.bed && samples?.get('fx', rec.bed);
+    const motor = rec?.motor && samples?.get('fx', rec.motor);
+    this.recorded = Boolean(bed || motor);
+    this.whineK = this.recorded ? rec.whine : 1;
+    this.fk = this.recorded && rec.fk ? rec.fk : pr.fk;
     this.w1 = v.osc(pr.buzz ? 'sawtooth' : 'sine', pr.f0, t);
     this.w2 = v.osc('sine', pr.f0 * 1.5, t);
     this.w2.detune.value = 9;
@@ -699,19 +985,39 @@ class EvVoice {
     lp.connect(this.level).connect(v.out);
     this.hg = v.gain(0);
     v.noise('white', t).connect(v.filter('highpass', 5000)).connect(this.hg).connect(this.level);
+    if (bed) {
+      this.bed = v.loop(bed, t);
+      this.bedG = v.gain(0);
+      this.bed.connect(v.filter('lowpass', 9000)).connect(this.bedG).connect(v.out);
+    }
+    if (motor) {
+      this.motor = v.loop(motor, t);
+      this.motorG = v.gain(0);
+      this.motor.connect(this.motorG).connect(v.out);
+    }
     if (pr.ticks) this.tick = new Ticker(v, t, v.out, 0.35);
   }
 
   set(r, p, t) {
     const pr = this.pr;
-    const f = pr.f0 + pr.fk * p.speed;
+    const f = pr.f0 + this.fk * p.speed;
     ramp(this.w1.frequency, f, t, 0.04);
     ramp(this.w2.frequency, f * 1.5, t, 0.04);
     ramp(this.hum.frequency, f * 0.5, t, 0.04);
     const move = Math.min(1, p.speed / 6);
     const lvl = pr.vol * (0.05 + 0.95 * move) * (0.35 + 0.65 * r.thr);
-    ramp(this.level.gain, lvl, t, 0.06);
+    ramp(this.level.gain, lvl * this.whineK, t, 0.06);
     ramp(this.hg.gain, 0.05 * r.thr * move, t, 0.06);
+    if (this.bed) {
+      // Pitch and level of the drive sound follow the speed; full throttle adds motor load.
+      const s = clamp(p.speed / Math.max(10, p.top || 45), 0, 2);
+      ramp(this.bed.playbackRate, 0.7 + 0.42 * s, t, 0.08);
+      ramp(this.bedG.gain, 1.9 * (0.06 + 0.94 * Math.min(1, p.speed / 30)) * (0.55 + 0.45 * r.thr), t, 0.08);
+    }
+    if (this.motor) {
+      ramp(this.motor.playbackRate, clamp(0.45 + p.speed / 32, 0.45, 2.2), t, 0.05);
+      ramp(this.motorG.gain, 1.3 * move * (0.2 + 0.8 * r.thr), t, 0.05);
+    }
     if (this.tick) this.tick.set(p.speed, r.thr, t);
     r.state.freq = f;
     r.state.level = lvl;
@@ -736,11 +1042,19 @@ class BikeVoice {
   }
 }
 
-// Rocket: a deep noise roar plus sub rumble that swells at lift-off.
+// Rocket: a deep noise roar plus sub rumble that swells at lift-off. With its recording
+// loaded, a real jet afterburner carries the roar.
 class RocketVoice {
-  constructor(v, pr) {
+  constructor(v, pr, samples) {
     const t = v.ctx.currentTime;
     this.pr = pr;
+    const roar = pr.rec?.roar && samples?.get('fx', pr.rec.roar);
+    this.recorded = Boolean(roar);
+    if (roar) {
+      this.roar = v.loop(roar, t);
+      this.roarG = v.gain(0);
+      this.roar.connect(this.roarG);
+    }
     this.lp = v.filter('lowpass', 300, 0.8);
     this.rg = v.gain(0.6);
     v.noise('brown', t).connect(this.lp).connect(this.rg);
@@ -754,15 +1068,21 @@ class RocketVoice {
     this.tone.connect(v.filter('lowpass', 220)).connect(this.tg);
     this.level = v.gain(0);
     for (const g of [this.rg, this.cg, this.sg, this.tg]) g.connect(this.level);
+    if (this.roarG) this.roarG.connect(this.level);
     this.level.connect(v.out);
   }
 
   set(r, p, t) {
     const s = clamp(p.speed / 90, 0, 1);
     const air = r.air;
+    const synth = this.roar ? 0.35 : 1; // the synthesised roar only fills in under the recording
+    if (this.roar) {
+      ramp(this.roar.playbackRate, 0.78 + 0.22 * s + 0.12 * air + 0.06 * r.thr, t, 0.1);
+      ramp(this.roarG.gain, 0.5 + 0.25 * s + 0.3 * air, t, 0.08);
+    }
     ramp(this.lp.frequency, 220 + 900 * s + 900 * air + 400 * r.thr, t, 0.08);
-    ramp(this.rg.gain, 0.55 + 0.25 * s + 0.35 * air, t, 0.08);
-    ramp(this.cg.gain, 0.04 + 0.08 * s + 0.1 * air, t, 0.08);
+    ramp(this.rg.gain, synth * (0.55 + 0.25 * s + 0.35 * air), t, 0.08);
+    ramp(this.cg.gain, synth * (0.04 + 0.08 * s + 0.1 * air), t, 0.08);
     ramp(this.sg.gain, 0.2 + 0.4 * air, t, 0.1);
     ramp(this.tone.frequency, 50 + 30 * s + 25 * air, t, 0.1);
     const lvl = this.pr.vol * (0.45 + 0.3 * r.thr + 0.25 * air);
@@ -868,12 +1188,23 @@ class ChugVoice {
 
 const VOICES = { ice: IceVoice, ev: EvVoice, bike: BikeVoice, rocket: RocketVoice, kart: KartVoice, hover: HoverVoice, chug: ChugVoice };
 
-// The continuous sounds of driving: engine (with gearbox), wind, tyre squeal and nitro hiss.
-// Built once per context; update() only moves parameters, it allocates nothing.
+// True when a vehicle's recorded voice can be built now (its samples have loaded).
+function recordedReady(pr, S) {
+  if (!S || !pr.rec) return false;
+  if (pr.rec.pack) return RecEngineVoice.can(pr, S);
+  const id = pr.rec.bed || pr.rec.motor || pr.rec.roar;
+  return Boolean(id && S.get('fx', id));
+}
+
+// The continuous sounds of driving: engine (with gearbox), wind, tyre squeal, the turbo
+// whistle (nitro hiss before the recordings load). Built once per context; update() only
+// moves parameters, it allocates nothing.
 class Rig {
-  constructor(ctx, dest, bufs) {
+  constructor(ctx, dest, bufs, samples = null) {
     this.ctx = ctx;
     this.bufs = bufs;
+    this.samples = samples;
+    this.useRec = true;
     this.engineBus = ctx.createGain();
     this.engineBus.gain.value = 0;
     this.engineBus.connect(dest);
@@ -886,9 +1217,9 @@ class Rig {
     // Tyre squeal: two narrow, wobbling noise bands.
     const sq = amb.noise('white', t);
     this.sqG = amb.gain(0);
-    const wob = amb.osc('sine', 4.3, t);
+    this.wob = amb.osc('sine', 4.3, t);
     const wg = amb.gain(70);
-    wob.connect(wg);
+    this.wob.connect(wg);
     for (const [f, q, g] of [[1850, 13, 2.2], [2900, 16, 1.5]]) {
       const bp = amb.filter('bandpass', f, q);
       wg.connect(bp.detune);
@@ -899,6 +1230,7 @@ class Rig {
     this.hissF = amb.filter('bandpass', 1300, 0.8);
     this.hissG = amb.gain(0);
     amb.noise('white', t).connect(this.hissF).connect(amb.filter('lowpass', 5000)).connect(this.hissG).connect(amb.out);
+    this.fx = null; // recorded whistle and squeal, see attachFx()
 
     this.voice = null;
     this.voiceV = null;
@@ -907,25 +1239,71 @@ class Rig {
     this.rpm = 0;
     this.thr = 0;
     this.air = 0;
-    this.state = { vehicle: null, voice: null, active: false, gear: 0, rpm: 0, freq: 0, level: 0, speed: 0, throttle: 0, wind: 0, squeal: 0, hiss: 0 };
+    this.spool = 0;
+    this.boostHi = 0;
+    this.boLock = false;
+    this.blowoff = 0; // > 0: Sound plays a blow-off of this strength, then clears it
+    this.ice = false;
+    this.turboK = 0;
+    this.state = { vehicle: null, voice: null, source: 'synth', active: false, gear: 0, rpm: 0, freq: 0, level: 0, speed: 0, throttle: 0, wind: 0, squeal: 0, hiss: 0, whistle: 0 };
   }
 
-  setVehicle(id) {
-    if (this.vehicle === id && this.voice) return;
+  get rec() {
+    return this.useRec ? this.samples : null;
+  }
+
+  // Recorded tyre squeal and turbo whistle, once the effects pack has loaded.
+  attachFx() {
+    const S = this.samples;
+    const w = S?.get('fx', 'whistle');
+    const sq = S?.get('fx', 'squeal');
+    if (this.fx || !w || !sq) return;
+    const amb = this.amb;
+    const t = this.ctx.currentTime;
+    const whistle = amb.loop(w, t, 0.6);
+    const whistleG = amb.gain(0);
+    whistle.connect(whistleG).connect(amb.out);
+    const squeal = amb.loop(sq, t);
+    const squealG = amb.gain(0);
+    if (squeal.detune) this.wob.connect(amb.gain(25)).connect(squeal.detune); // tyres wobble a little
+    squeal.connect(squealG).connect(amb.out);
+    this.fx = { whistle, whistleG, squeal, squealG };
+  }
+
+  // Picks the voice again when recordings arrive or are switched on/off (keeps the gear).
+  refresh() {
+    this.attachFx();
+    if (this.vehicle) this.setVehicle(this.vehicle, true);
+  }
+
+  setVehicle(id, keepGear = false) {
+    const pr = ENGINES[id] ?? ENGINES.crv;
+    const S = this.rec;
+    const want = recordedReady(pr, S);
+    if (this.vehicle === id && this.voice && (!keepGear || Boolean(this.voice.recorded) === want)) return;
+    const Kind = pr.voice === 'ice' && want ? RecEngineVoice : VOICES[pr.voice];
     const t = this.ctx.currentTime;
     const old = this.voiceV;
     if (old) {
       old.out.gain.setTargetAtTime(0, t, 0.05);
       setTimeout(() => old.dispose(), 400);
     }
-    const pr = ENGINES[id] ?? ENGINES.crv;
     this.vehicle = id;
     this.voiceV = new Voice(this.ctx, this.engineBus, this.bufs);
-    this.voice = new VOICES[pr.voice](this.voiceV, pr);
-    this.gear = 0;
-    this.rpm = 0;
+    if (old) {
+      this.voiceV.out.gain.value = 0;
+      this.voiceV.out.gain.setTargetAtTime(1, t, 0.05);
+    }
+    this.voice = new Kind(this.voiceV, pr, S);
+    if (!keepGear) {
+      this.gear = 0;
+      this.rpm = 0;
+    }
+    this.ice = Boolean(pr.rec?.pack);
+    this.turboK = pr.rec?.turbo ?? 0;
     this.state.vehicle = id;
     this.state.voice = pr.voice;
+    this.state.source = this.voice.recorded ? 'recorded' : 'synth';
   }
 
   // Simulated gearbox: gear from speed, rpm within the gear, a level dip on each upshift.
@@ -969,9 +1347,41 @@ class Rig {
       else if (p.brake && sp > 16) squeal = Math.min(1, (sp - 16) / 25);
       if (BIKES.has(this.vehicle)) squeal *= 0.45;
     }
-    ramp(this.sqG.gain, squeal * SQUEAL_VOL, t, 0.05);
+    const fx = this.useRec ? this.fx : null;
+    ramp(this.sqG.gain, fx ? 0 : squeal * SQUEAL_VOL, t, 0.05);
+    if (this.fx) {
+      ramp(this.fx.squealG.gain, fx ? squeal * REC_SQUEAL_VOL : 0, t, 0.05);
+      ramp(this.fx.squeal.playbackRate, 0.9 + 0.15 * Math.min(1, sp / 60), t, 0.1);
+    }
 
-    const hiss = !active ? 0 : p.turbo ? 1 : p.boost ? 0.7 : 0;
+    // Boost: nitro or the turbo power spool the turbo up (a car with a factory turbo also
+    // spools a little on full throttle at high rpm). When the boost drops away, the blow-off
+    // valve vents (Sound plays it).
+    const boosting = active && (p.boost || p.turbo);
+    this.spool += ((boosting ? 1 : 0) - this.spool) * Math.min(1, dt * (boosting ? 2.2 : 6));
+    const n = this.rpm;
+    const factory = active ? this.turboK * this.thr * clamp((n - 0.35) / 0.55, 0, 1) : 0;
+    const boost = Math.max(this.spool, factory);
+    const whistle = this.ice && fx ? boost : 0;
+    if (this.fx) {
+      ramp(this.fx.whistleG.gain, WHISTLE_VOL * whistle * (0.35 + 0.65 * n), t, 0.04);
+      ramp(this.fx.whistle.playbackRate, 0.5 + 0.5 * boost * (0.6 + 0.4 * n), t, 0.06);
+    }
+    if (this.boLock) {
+      // One blow-off per boost: wait until it has died down.
+      if (boost < 0.15) this.boLock = false;
+      this.boostHi = boost;
+    } else if (this.ice && this.boostHi > 0.55 && boost < this.boostHi - 0.3) {
+      this.blowoff = this.boostHi;
+      this.boLock = true;
+      this.boostHi = boost;
+    } else {
+      this.boostHi = Math.max(boost, this.boostHi - dt * 0.4);
+    }
+
+    // The synthesised boost hiss stays for rides without recordings (and before they load).
+    const synthHiss = !(fx && (this.ice || this.voice?.recorded));
+    const hiss = !active || !synthHiss ? 0 : p.turbo ? 1 : p.boost ? 0.7 : 0;
     ramp(this.hissG.gain, hiss * HISS_VOL, t, hiss ? 0.05 : 0.15);
     ramp(this.hissF.frequency, 1100 + Math.min(sp, 90) * 18, t, 0.1);
 
@@ -983,6 +1393,7 @@ class Rig {
     st.wind = wind;
     st.squeal = squeal;
     st.hiss = hiss;
+    st.whistle = whistle;
   }
 
   dispose() {
@@ -1033,6 +1444,8 @@ class Sound {
     this.buttons = [];
     this.dropped = 0;
     this.skipped = 0;
+    this.samples = new Samples();
+    this.useRec = true;
     this.muted = false;
     try { this.muted = localStorage.getItem(MUTE_KEY) === '1'; } catch { /* storage unavailable */ }
     if (typeof window === 'undefined') return;
@@ -1045,13 +1458,27 @@ class Sound {
     return typeof window !== 'undefined' && Boolean(window.AudioContext || window.webkitAudioContext);
   }
 
-  // Live state for the dev hook and the sound studio.
+  // Live state for the dev hook and the sound studio. engine.source says whether the engine
+  // playing is 'recorded' or 'synth'; samples.state is 'not loaded', 'loading', 'ready',
+  // 'partial' or 'failed'.
   get debug() {
     return {
       muted: this.muted, state: this.ctx?.state ?? (this.failed ? 'unsupported' : 'not started'), counts: { ...this.counts },
       voices: this.voices.length, dropped: this.dropped, skipped: this.skipped, horn: Boolean(this.horn),
-      engine: this.rig ? { ...this.rig.state } : null, errors: this.errors.slice(),
+      engine: this.rig ? { ...this.rig.state } : null, samples: this.samples.debug, useRecordings: this.useRec, errors: this.errors.slice(),
     };
+  }
+
+  // false = synthesised engines and effects only (to compare in the sound studio).
+  get useRecordings() {
+    return this.useRec;
+  }
+
+  set useRecordings(on) {
+    this.useRec = Boolean(on);
+    if (!this.rig) return;
+    this.rig.useRec = this.useRec;
+    try { this.rig.refresh(); } catch (e) { this.fail(e); }
   }
 
   fail(e) {
@@ -1090,8 +1517,12 @@ class Sound {
     }
     this.bufs = buffersFor(this.ctx);
     this.bus = buildMaster(this.ctx, this.muted ? 0 : MASTER_VOL);
-    this.rig = new Rig(this.ctx, this.bus.drive, this.bufs);
+    this.rig = new Rig(this.ctx, this.bus.drive, this.bufs, this.samples);
+    this.rig.useRec = this.useRec;
     this.rig.setVehicle(this.vehicle);
+    // The recordings load in the background; each voice switches over when its pack is in.
+    this.samples.onPack = () => this.rig.refresh();
+    this.samples.load(this.ctx);
     this.ctx.onstatechange = () => {
       if (this.ctx.state === 'running') this.unlock();
     };
@@ -1185,6 +1616,7 @@ class Sound {
       // A power stinger waits for the ? box arpeggio to land first.
       if (STINGERS.has(name) && t - this.lastBoxAt < 0.3) t = this.lastBoxAt + 0.3;
       const v = new Voice(this.ctx, UI_SOUNDS.has(name) ? this.bus.ui : this.bus.sfx, this.bufs);
+      v.rec = this.useRec ? this.samples : null;
       this.track(v, fn(v, t, o));
     } catch (e) {
       this.fail(e);
@@ -1244,6 +1676,11 @@ class Sound {
     if (!this.rig || this.ctx.state !== 'running') return;
     try {
       this.rig.update(dt, p, this.ctx.currentTime);
+      if (this.rig.blowoff) {
+        const s = this.rig.blowoff;
+        this.rig.blowoff = 0;
+        this.play('blowoff', { strength: s });
+      }
     } catch (e) {
       this.fail(e);
     }
@@ -1253,4 +1690,4 @@ class Sound {
 export const sound = new Sound();
 
 // Internals for the sound studio's offline checks (sound-studio.html).
-export const soundLab = { SFX, HELD, HORNS, ENGINES, Voice, Rig, buffersFor, buildMaster, MASTER_VOL, UI_SOUNDS, GEAR_TOP };
+export const soundLab = { SFX, HELD, HORNS, ENGINES, ENGINE_SETS, SAMPLE_PACKS, Voice, Rig, Samples, buffersFor, buildMaster, MASTER_VOL, UI_SOUNDS, GEAR_TOP };

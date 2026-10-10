@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Route } from './route.js';
 import { markingPlan, activeSignals } from './lane-layout.js';
+import { overheadClearance } from './clearance.js';
 import { buildLandmarks, landmarkFootprints } from './landmarks.js';
 
 const FOG_NEAR = 250;
@@ -1618,6 +1619,7 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
   // No trees inside landmark sites (refineries, the Legislature grounds…).
   for (const f of landmarkFootprints(data)) occupancy.addBox(f.x - f.hw, f.z - f.hd, f.x + f.hw, f.z + f.hd);
 
+  const landmarks = buildLandmarks(data, heightAt, onRoad, routeAtFor(route));
   group.add(
     ...buildTerrain(data.terrain, heights, data.water),
     buildRouteRoad(route, heightAt, data.water, data.id === 'home', asphalt, data.roads),
@@ -1627,7 +1629,7 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
     buildBuildings(data.buildings, heightAt, occupancy),
     buildSigns(data.buildings, route, heightAt),
     buildExitSigns(route, data.exits),
-    buildLandmarks(data, heightAt, onRoad, routeAtFor(route)),
+    landmarks,
     buildTrees(route, heightAt, occupancy, data.water),
     buildStreetLights(route),
     buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : data.name.toUpperCase()),
@@ -1645,5 +1647,8 @@ export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
     });
   }
 
-  return { route, heightAt, group, dispose, data };
+  // Room above the road (bridge decks, overpasses) so flying and the camera stay under it.
+  const clearance = overheadClearance(route, data, landmarks);
+
+  return { route, heightAt, group, dispose, data, clearance };
 }

@@ -63,6 +63,7 @@ const BASE_SPEED = 45; // m/s ≈ 162 km/h before car stats
 const NITRO_BONUS = 21; // m/s on top of the car's top speed
 const TURBO_SPEED = 90; // m/s ≈ 324 km/h
 const FLY_HEIGHT = 7;
+const ROOF_ROOM = 2.3; // m between the road and a ride's roof, plus a little air (for flying under bridges)
 const LIFTOFF_SPEED = 250 / 3.6; // rides that can fly (the Rocket) take off above this
 const BLAST_RANGE = 110;
 const RUSH_HOUR_SPEED = 8; // m/s, roughly what the real commute averages at rush hour
@@ -719,7 +720,13 @@ function drive(dt, input) {
     sound.play('liftoff');
   }
   S.airborne = airborne;
-  S.y += ((S.power === 'fly' || airborne ? FLY_HEIGHT : 0) - S.y) * Math.min(1, dt * 3);
+  // Fly as high as FLY_HEIGHT, but never into a bridge deck or overpass over the road: look
+  // ahead so the car dips under it in time, and never above the room right here.
+  const want = S.power === 'fly' || airborne ? FLY_HEIGHT : 0;
+  const room = world.clearance;
+  const roof = Math.max(0, room.ahead(S.s - 6, S.s + 10 + S.speed * 1.2) - ROOF_ROOM);
+  S.y += (Math.min(want, roof) - S.y) * Math.min(1, dt * 3);
+  S.y = Math.min(S.y, Math.max(0, room.at(S.s) - ROOF_ROOM));
 }
 
 function checkCollisions() {
@@ -799,12 +806,16 @@ function updateChaseCamera(dt) {
   camera.fov = S.fov;
   camera.updateProjectionMatrix();
 
-  route.toWorld(S.s - 8.5, S.x * 0.8, 3.6 + S.y * 1.1, tmpA);
-  route.toWorld(S.s + 14, S.x * 0.9, 1.4 + S.y * 0.8, tmpB);
+  // Under a bridge deck or overpass the camera stays below it, even while flying.
+  const room = world.clearance;
+  const camRoom = Math.max(1.6, room.ahead(S.s - 8.5, S.s + 6 + S.speed * 0.6) - 0.6);
+  route.toWorld(S.s - 8.5, S.x * 0.8, Math.min(3.6 + S.y * 1.1, camRoom), tmpA);
+  route.toWorld(S.s + 14, S.x * 0.9, Math.min(1.4 + S.y * 0.8, Math.max(1, room.at(S.s + 14) - 0.6)), tmpB);
   // Follow harder at high speed so the camera never falls far behind (the Rocket does 360+ km/h).
   const k = snapCamera ? 1 : Math.min(1, dt * (8 + S.speed * 0.35));
   camPos.lerp(tmpA, k);
   camLook.lerp(tmpB, k);
+  camPos.y = Math.min(camPos.y, tmpA.y); // never lag up into a deck
   snapCamera = false;
 
   S.shake = Math.max(0, S.shake - dt);

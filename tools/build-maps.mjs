@@ -1100,6 +1100,18 @@ async function buildMap(m, ptsGlobal, osm) {
   const ctr = layout.map((l) => l.ctr);
   const { right, left } = laneEdges(layout);
   // Ignore tiny bridge blips (culverts mapped as bridges are fine, but single-sample noise is not).
+  // Bridges only where OSM says so. Samples with no OSM road (gaps, and the parking-lot
+  // stretch at a route's end) were filled from the road before them; they are a bridge only
+  // when the matched roads on both sides of the gap are bridges. (Snow Valley's last 400 m
+  // once copied a creek bridge, so the road was drawn as a straight deck under the ground.)
+  for (let i = 0; i < N; i++) {
+    if (matched[i]) continue;
+    let j = i;
+    while (j < N && !matched[j]) j++;
+    const both = i > 0 && j < N && bridge[i - 1] && bridge[j];
+    for (let k = i; k < j; k++) bridge[k] = both ? 1 : 0;
+    i = j;
+  }
   const bridgeClean = medianArr(bridge, 3);
 
   // Street name runs: [[sampleIndex, name], …]

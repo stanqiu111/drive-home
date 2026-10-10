@@ -191,7 +191,40 @@ function checkMap(id) {
     }
   }
   checkStructures(data, rd, bad);
+  checkBridges(data, full, raw, bad);
   return { id, problems, lines: plan.length };
+}
+
+// Bridges: only where OSM has a road (no made-up bridge copied into a gap), and never
+// under the ground (the game doesn't cut the ground away under bridges).
+function checkBridges(data, rd, raw, bad) {
+  const { step } = rd;
+  const n = rd.x.length;
+  // Made-up bridges: a run of unmatched samples marked as a bridge for 30 m or more.
+  let run = 0;
+  for (let i = 0; i < n; i++) {
+    run = rd.bridge[i] && raw[i].unmatched ? run + 1 : 0;
+    if (run === 15) bad('bridge', (i - 14) * step, 'a stretch with no OSM road is drawn as a bridge');
+  }
+  // Buried bridge decks: ground above the deck surface for 10 m or more.
+  const t = data.terrain;
+  const buf = Buffer.from(t.h, 'base64');
+  const h = new Int16Array(buf.buffer, buf.byteOffset, buf.byteLength / 2);
+  const heightAt = (x, z) => {
+    const fi = (x - t.x0) / t.cell, fj = (z - t.z0) / t.cell, i = Math.floor(fi), j = Math.floor(fj);
+    if (i < 0 || j < 0 || i >= t.nx - 1 || j >= t.nz - 1) return null;
+    const a = h[j * t.nx + i], b = h[j * t.nx + i + 1], c = h[(j + 1) * t.nx + i], d = h[(j + 1) * t.nx + i + 1];
+    if (a === -32768 || b === -32768 || c === -32768 || d === -32768) return null;
+    const u = fi - i, v = fj - j; // same triangle split as world.js makeHeightAt
+    return (u + v <= 1 ? a + (b - a) * u + (c - a) * v : d + (c - d) * (1 - u) + (b - d) * (1 - v)) / 10;
+  };
+  let buried = 0;
+  for (let i = 1; i < n - 1; i++) {
+    if (!rd.bridge[i]) { buried = 0; continue; }
+    const g = heightAt(rd.x[i], rd.z[i]);
+    buried = g != null && g > rd.y[i] + 0.3 ? buried + 1 : 0;
+    if (buried === 5) bad('bridge', (i - 4) * step, `bridge deck is under the ground (ground ${g.toFixed(1)} m, deck ${rd.y[i].toFixed(1)} m)`);
+  }
 }
 
 // Where side roads (on the ground) meet our road: [s from, s to] of each one's surface.

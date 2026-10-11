@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Route } from './route.js';
-import { markingPlan, activeSignals } from './lane-layout.js';
+import { markingPlan, activeSignals, foldCurvature } from './lane-layout.js';
 import { overheadClearance } from './clearance.js';
 import { buildLandmarks, landmarkFootprints, projectTo } from './landmarks.js';
 
@@ -658,6 +658,7 @@ async function buildRouteRoad(route, heightAt, waterLevel, archAt, asphalt, road
   };
   const nearStreet = sideStreetIndex(roads);
   const selfNear = routeLookup(route);
+  const foldCurv = foldCurvature(route.laneData);
   // Sidewalk on each side of each sample: city streets only, broken at intersections.
   const hasWalk = [new Uint8Array(route.n), new Uint8Array(route.n)];
   const tmpV = new THREE.Vector3();
@@ -674,7 +675,7 @@ async function buildRouteRoad(route, heightAt, waterLevel, archAt, asphalt, road
       const onOther = other && Math.abs(other.i - i) > 4
         && Math.abs(-(tmpV.x - route.x[other.i]) * route.tz[other.i] + (tmpV.z - route.z[other.i]) * route.tx[other.i])
           < Math.max(route.rightArr[other.i], -route.leftArr[other.i]) + 0.3 + WALK_W / 2;
-      hasWalk[side][i] = nearStreet(tmpV.x, tmpV.z, 2.5) || outer * route.curv[i] > 0.7 || onOther ? 0 : 1;
+      hasWalk[side][i] = nearStreet(tmpV.x, tmpV.z, 2.5) || outer * foldCurv[i] > 0.7 || onOther ? 0 : 1;
     }
     if ((i & 255) === 0 && sl.due()) await sl.wait();
   }

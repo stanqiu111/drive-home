@@ -1,5 +1,7 @@
 // Road-line guard: checks the painted lines and lanes of every map before a build/deploy.
 //   node tools/check-roads.mjs [mapId ...] [--verbose]
+//   node tools/check-roads.mjs --dir <folder>   every map file in a folder (e.g. custom routes
+//                                              saved from the game, see "Custom routes")
 // It runs the same functions the game uses (src/lane-layout.js) on public/maps/*.json and
 // compares the result with the raw OpenStreetMap lane layout the builder stores in each map
 // (route.src), so a mistake in the builder's cleaning can't hide by agreeing with itself.
@@ -14,7 +16,8 @@ import {
 } from '../src/lane-layout.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-const MAP_DIR = path.join(ROOT, 'public', 'maps');
+const dirArg = process.argv.indexOf('--dir');
+const MAP_DIR = dirArg > 0 ? path.resolve(process.argv[dirArg + 1]) : path.join(ROOT, 'public', 'maps');
 const OW_GLITCH = 30;     // m: raw one-way/two-way runs shorter than this may be smoothed away
 const MIN_LAYOUT = 80;    // m: lane-count changes closer together than this flicker
 const END_SLACK = 40;     // m at each end of the route where the rules relax
@@ -23,8 +26,10 @@ const HALF_CAR = 0.9;     // m: a car centred in a lane must clear the edge by t
 
 const args = process.argv.slice(2);
 const verbose = args.includes('--verbose');
-const only = args.filter((a) => !a.startsWith('--'));
-const ids = JSON.parse(fs.readFileSync(path.join(MAP_DIR, 'index.json'), 'utf8')).map((m) => m.id)
+const only = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--dir');
+const ids = (dirArg > 0
+  ? fs.readdirSync(MAP_DIR).filter((f) => f.endsWith('.json') && f !== 'index.json' && !f.endsWith('.meta.json')).map((f) => f.slice(0, -5))
+  : JSON.parse(fs.readFileSync(path.join(MAP_DIR, 'index.json'), 'utf8')).map((m) => m.id))
   .filter((id) => !only.length || only.includes(id));
 
 function runs(n, key) {

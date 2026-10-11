@@ -13,7 +13,7 @@
 
 import { LANDMARK_LIST } from '../landmark-list.js';
 import { SKYLINE_TOWERS } from '../landmarks/skyline-data.js';
-import { LANE_W, LANE_FORMAT, TAPER_MAX } from '../lane-layout.js';
+import { LANE_W, LANE_FORMAT, TAPER_MAX, laneInput, stopLineExtent } from '../lane-layout.js';
 
 // The built-in maps are projected around one global origin (Summerside, 91 St SW: a public
 // spot); each map's output is then shifted so its own start sits at (0, 0). Custom routes
@@ -1505,6 +1505,12 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
       mouths.push([nr.i * STEP - half, nr.i * STEP + half]);
     }
   }
+  // The lanes as the game will read them (edges rounded as in the file), so stop lines are
+  // placed where our lanes really are.
+  const laneRd = laneInput({
+    step: STEP, x: pts.map((q) => r2(q[0])), z: pts.map((q) => r2(q[1])), right: right.map(r1), left: left.map(r1),
+    lanes, ow, ctr: ctr.some(Boolean) ? ctr : undefined, laneFormat: LANE_FORMAT,
+  });
   const signals = [];
   for (const cl of sigClusters) {
     const on = cl.filter((nd) => nd.onRoad);
@@ -1517,12 +1523,15 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
       const mid = (m) => (m[0] + m[1]) / 2;
       const c = mid(near.reduce((a, b) => (Math.abs(mid(b) - s) < Math.abs(mid(a) - s) ? b : a)));
       // Grow from the closest mouth: any mouth within 7 m of the junction so far joins it
-      // (the other leg of the cross street, a skewed corner, a slip lane).
+      // (the other leg of the cross street, a skewed corner, a slip lane), also past the
+      // 35 m searched first, up to 40 m from the signal (the far legs of a wide junction:
+      // tools/check-roads.mjs looks that far).
       lo = c;
       hi = c;
       for (let grew = true; grew;) {
         grew = false;
-        for (const [a, b] of near) {
+        for (const [a, b] of mouths) {
+          if (b < s - 40 || a > s + 40) continue;
           if (b < lo - 7 || a > hi + 7 || (a >= lo && b <= hi)) continue;
           lo = Math.min(lo, a);
           hi = Math.max(hi, b);
@@ -1530,7 +1539,15 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
         }
       }
     }
-    const stop = Math.max(10, lo - 4.6); // stop line, then the crosswalk (1.2-4.2 m past it), then the junction
+    let stop = Math.max(10, lo - 4.6); // stop line, then the crosswalk (1.2-4.2 m past it), then the junction
+    // Our lanes must be most of a lane wide at the stop line. Where a two-way street turns
+    // into a one-way ramp at the junction the road already narrows before it: move the stop
+    // line back to full width (at most 20 m).
+    for (let back = 0; back < 20; back += 0.5) {
+      const [a, b] = stopLineExtent(laneRd, stop);
+      if (b - a >= LANE_W * 0.7 + 0.1 || stop <= 10) break;
+      stop -= 0.5;
+    }
     if (signals.length && stop < signals[signals.length - 1][2] + 5) continue;
     signals.push([Math.round(s), Math.round(stop * 10) / 10, Math.round((hi + 1.5) * 10) / 10]);
   }

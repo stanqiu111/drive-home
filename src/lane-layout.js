@@ -101,26 +101,34 @@ export function activeSignals(signals = [], length) {
   return signalList(signals).filter((g) => g.s < length - 120);
 }
 
-// Signed curvature of the route line per sample (1/m, + = turning right), as in route.js.
+// How sharply the route turns at each sample, for the fold rule (1/m, + = turning right): the
+// turn between the directions one sample before and after (the way tools/check-roads.mjs
+// finds folds), the sharpest within two samples either side. A curvature averaged over
+// 16 m (route.js) misses a corner's sharpest point by a third or more, and on a wide road
+// the inside lines then folded over (custom routes, 2026-10-10).
 const curvCache = new WeakMap();
-export function routeCurvature(rd) {
+export function foldCurvature(rd) {
   let k = curvCache.get(rd);
   if (k) return k;
   const n = rd.x.length;
   const tx = new Float64Array(n);
   const tz = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    const a = Math.max(0, i - 2);
-    const b = Math.min(n - 1, i + 2);
+    const a = Math.max(0, i - 1);
+    const b = Math.min(n - 1, i + 1);
     const l = Math.hypot(rd.x[b] - rd.x[a], rd.z[b] - rd.z[a]) || 1;
     tx[i] = (rd.x[b] - rd.x[a]) / l;
     tz[i] = (rd.z[b] - rd.z[a]) / l;
   }
+  const local = new Float64Array(n);
+  for (let i = 1; i < n - 1; i++) {
+    local[i] = Math.atan2(tx[i - 1] * tz[i + 1] - tz[i - 1] * tx[i + 1], tx[i - 1] * tx[i + 1] + tz[i - 1] * tz[i + 1]) / (2 * rd.step);
+  }
   k = new Float64Array(n);
   for (let i = 0; i < n; i++) {
-    const a = Math.max(0, i - 4);
-    const b = Math.min(n - 1, i + 4);
-    k[i] = Math.atan2(tx[a] * tz[b] - tz[a] * tx[b], tx[a] * tx[b] + tz[a] * tz[b]) / ((b - a) * rd.step || 1);
+    let best = 0;
+    for (let j = Math.max(0, i - 2); j <= Math.min(n - 1, i + 2); j++) if (Math.abs(local[j]) > Math.abs(best)) best = local[j];
+    k[i] = best;
   }
   curvCache.set(rd, k);
   return k;
@@ -167,7 +175,7 @@ export function markingPlan(rd, signals = []) {
     return list !== undefined && list.some(([a, b]) => s > a && s < b);
   };
   const at = (arr, s) => lerpAt(rd, arr, s);
-  const curv = routeCurvature(rd);
+  const curv = foldCurvature(rd);
   // On a turn tighter than the road is wide, lines on the inside would fold over.
   const folds = (s, lat) => lat * curv[clampI(rd, Math.round(s / step))] > FOLD;
 

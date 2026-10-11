@@ -187,70 +187,150 @@ export const CAR_MODELS = {
   },
   is300: {
     brand: 'Lexus', name: 'IS 300', color: 0x3567b5, desc: 'Spindle grille, sharp handling',
-    len: 4.71, width: 1.84, wheelR: 0.335, tireW: 0.235, axles: [1.42, -1.38], round: 0.2, fin: -1.0,
-    section: { shoulder: 0.66, belt: 0.06, tuck: 0.08, crease: 1.2, crown: 0.03, flare: 0.012, gap: 0.045 },
-    side: [[2.35, 0.25, 0.7], [2.2, 0.18, 0.8], [1.6, 0.18, 0.86], [0.95, 0.18, 0.9], [-0.6, 0.2, 0.95], [-1.75, 0.22, 1.0], [-2.22, 0.25, 1.02], [-2.35, 0.32, 0.88]],
-    plan: [[2.35, 0.72], [2.15, 0.88], [1.6, 0.91], [-1.5, 0.94], [-2.2, 0.88], [-2.35, 0.78]],
-    cabin: [[0.95, 0.91, 0.74], [0.2, 1.37, 0.66], [-0.75, 1.42, 0.66], [-1.35, 1.32, 0.68], [-1.8, 1.0, 0.8]],
-    // Chrome-trimmed window line that kicks up and ends in a sharp point.
-    windows: { belt: 0.04, top: 0.06, trim: true, bands: [{ u0: 0.8, u1: -1.56, k0: 0.6, k1: 0.75 }], pillars: [-0.36], kick: [[-0.9, 0], [-1.56, 0.07]] },
-    windshield: [0.92, 0.22], backlight: [-1.3, -1.76],
-    rim: { n: 5, style: 'split', color: 0xc4c8ce },
-    doors: [0.8, -0.36, -1.32], handles: [-0.22, -1.2],
+    // 2027 Lexus IS as shown on lexus.ca (Oct 2026). Canada now sells it only as the IS 350 AWD, on
+    // the IS 300's body: 4720 long, 1839 wide, 1440 tall, wheelbase 2800, track 1580/1605, 235/40R19.
+    // Shaped on Lexus Canada's studio photos of the 2026+ facelift.
+    len: 4.72, width: 1.84, wheelR: 0.335, tireW: 0.235, axles: [1.48, -1.32], round: 0.13, fin: -1.09, nose: 0.1, tail: 0.1,
+    section: { shoulder: 0.62, belt: 0.075, tuck: 0.08, crease: 1.2, crown: 0.03, flare: 0.012, gap: 0.035, rocker: false },
+    side: [
+      [2.36, 0.2, 0.42], [2.33, 0.195, 0.55], [2.29, 0.19, 0.645], [2.19, 0.19, 0.725], [2.05, 0.19, 0.805], [1.82, 0.19, 0.89], [1.64, 0.19, 0.932],
+      [1.37, 0.19, 0.975], [1.0, 0.19, 1.008], [0.8, 0.19, 0.955], [0.4, 0.19, 0.968], [-0.3, 0.19, 0.992], [-1.0, 0.19, 1.006],
+      [-1.3, 0.195, 1.02], [-1.6, 0.2, 1.04], [-1.9, 0.21, 1.06], [-2.1, 0.22, 1.04], [-2.25, 0.24, 1.02], [-2.28, 0.25, 0.95], [-2.31, 0.26, 0.78], [-2.36, 0.3, 0.62],
+    ],
+    plan: [[2.36, 0.4], [2.3, 0.6], [2.2, 0.74], [2.05, 0.84], [1.9, 0.89], [1.6, 0.915], [1.2, 0.912], [0.5, 0.895], [-0.4, 0.895], [-1.0, 0.91], [-1.4, 0.92], [-1.85, 0.905], [-2.05, 0.87], [-2.15, 0.83], [-2.25, 0.74], [-2.32, 0.56], [-2.36, 0.42]],
+    cabin: [
+      [0.95, 1.0, 0.69], [0.77, 1.1, 0.655], [0.57, 1.205, 0.63], [0.37, 1.303, 0.61], [0.17, 1.371, 0.595], [-0.13, 1.415, 0.585], [-0.5, 1.425, 0.58],
+      [-0.83, 1.405, 0.58], [-1.03, 1.374, 0.585], [-1.23, 1.312, 0.595], [-1.43, 1.235, 0.61], [-1.63, 1.155, 0.63], [-1.83, 1.078, 0.655], [-1.92, 1.06, 0.665],
+    ],
+    // The window line rises to the back and ends in the IS's sharp rear point; a thin bar splits off
+    // the rear door's fixed pane. The 2027 frames are gloss black, not chrome.
+    windows: {
+      belt: 0.012, top: 0.075, bands: [{ u0: 0.81, u1: -1.28, k0: 0.55, k1: 0.44 }], pillars: [-0.26], kick: [[-1.14, 0], [-1.19, 0.008], [-1.28, 0.13]],
+      extra: [{ u0: -0.958, u1: -0.982, k0: 40, k1: 40, mat: 'dark', off: 0.016 }],
+    },
+    windshield: [0.93, -0.05], backlight: [-1.05, -1.86],
+    rim: { n: 10, style: 'split', color: 0x8c939b },
+    doors: [0.92, -0.225, -1.0], handles: [-0.05, -1.03],
+    wrap: 0.45, mirror: { u: 0.57, mat: 'dark' },
     stats: { top: 1.12, accel: 1.1, grip: 1.2 },
     details(c) {
-      // The hourglass spindle grille in a chrome frame.
-      const spindle = [[-0.36, 0.7], [0.36, 0.7], [0.26, 0.5], [0.56, 0.22], [-0.56, 0.22], [-0.26, 0.5]];
-      c.frontMid('chrome', [[-0.39, 0.72], [0.39, 0.72], [0.29, 0.5], [0.6, 0.2], [-0.6, 0.2], [-0.29, 0.5]], 0.01);
-      c.frontMid('grille', spindle, 0.016);
-      c.frontMid('chrome', ellipse(0, 0.62, 0.075, 0.045), 0.022);
-      c.front('lens', [[0.42, 0.7], [0.86, 0.76], [0.89, 0.7], [0.8, 0.65], [0.46, 0.655]]);
-      c.front('head', [[0.48, 0.67], [0.8, 0.705], [0.82, 0.685], [0.5, 0.652]], 0.018);
-      // L-shaped "arrowhead" running light under each headlight.
-      c.front('head', [[0.64, 0.46], [0.69, 0.46], [0.75, 0.62], [0.7, 0.62]], 0.016);
-      c.front('dark', [[0.62, 0.24], [0.8, 0.26], [0.83, 0.44], [0.7, 0.42]]);
-      // Full-width L-shaped tail lights.
-      c.rear('tail', [[0.25, 0.935], [0.83, 0.95], [0.86, 0.88], [0.74, 0.86], [0.72, 0.75], [0.66, 0.75], [0.66, 0.88], [0.27, 0.9]]);
-      c.rearMid('tail', rect(-0.26, 0.913, 0.26, 0.928));
-      c.rearMid('dark', [[-0.72, 0.3], [0.72, 0.3], [0.68, 0.42], [-0.68, 0.42]]);
-      c.rearMid('chrome', ellipse(0, 0.8, 0.07, 0.04), 0.016);
-      c.plate(0.62);
-      for (const s of [-1, 1]) c.pipe(s * 0.5, 0.37, 'square');
-      c.box('paint', 0, 1.025, 2.25, 1.1, 0.02, 0.08);
+      // Front, 2026+ facelift: the L badge sits on a body-colour nose panel above a black slot and
+      // the big mesh spindle grille; slim blade headlights with a running-light line that hooks down
+      // at the inner end; black mesh fangs in the bumper corners and a black splitter.
+      const grille = [[0.42, 0.612], [0.4, 0.545], [0.5, 0.485], [0.57, 0.42], [0.595, 0.33], [0.565, 0.25], [0.52, 0.24]];
+      c.frontMid('grille', [...grille, ...grille.slice().reverse().map(([x, y]) => [-x, y])], 0.014);
+      c.frontMid('dark', [[-0.43, 0.606], [0.43, 0.606], [0.41, 0.632], [-0.41, 0.632]], 0.016);
+      c.frontMid('dark', [[-0.44, 0.694], [0.44, 0.694], [0.45, 0.688], [-0.45, 0.688]], 0.013);
+      c.frontMid('chrome', ellipse(0, 0.668, 0.05, 0.023, 10), 0.02);
+      c.frontMid('paint', ellipse(0, 0.668, 0.04, 0.016, 10), 0.022);
+      c.front('lens', [[0.405, 0.615], [0.44, 0.655], [0.675, 0.697], [0.85, 0.736], [0.78, 0.675], [0.735, 0.632], [0.69, 0.61], [0.49, 0.6]]);
+      c.front('head', [[0.425, 0.614], [0.43, 0.632], [0.62, 0.673], [0.78, 0.712], [0.78, 0.703], [0.62, 0.664], [0.45, 0.626], [0.44, 0.612]], 0.018);
+      c.front('grille', [[0.72, 0.3], [0.775, 0.475], [0.84, 0.4], [0.84, 0.27], [0.78, 0.27]], 0.014);
+      c.box('dark', 0, 0.2, -2.29, 1.0, 0.03, 0.12);
+      // Headlights and mesh fangs wrap round onto the front fenders.
+      c.side('lens', [[1.82, 0.738], [1.95, 0.728], [2.05, 0.712], [2.12, 0.695], [2.2, 0.68], [2.2, 0.62], [2.1, 0.615], [2.05, 0.635], [2.0, 0.672], [1.92, 0.712]]);
+      c.side('head', [[1.84, 0.736], [1.95, 0.727], [2.05, 0.711], [2.12, 0.694], [2.12, 0.686], [2.05, 0.702], [1.95, 0.719]], 0.009);
+      c.side('dark', [[1.9, 0.2], [2.05, 0.215], [2.25, 0.25], [2.27, 0.2], [2.0, 0.19]]);
+      // The IS's sculpted flank: a long concave teardrop over both doors, pointed at the rear wheel,
+      // under the bright haunch (split at the door line so the shut line stays visible).
+      c.side('paint', [[-0.235, 0.85], [-0.317, 0.846], [-0.55, 0.819], [-0.736, 0.763], [-0.876, 0.67], [-0.946, 0.492], [-0.853, 0.437], [-0.69, 0.381], [-0.457, 0.32], [-0.235, 0.276]], 0.003, 0.84);
+      c.side('paint', [[-0.215, 0.856], [0.009, 0.865], [0.381, 0.87], [0.753, 0.865], [0.9, 0.857], [0.912, 0.67], [0.9, 0.44], [0.846, 0.255], [0.613, 0.245], [0.194, 0.254], [-0.178, 0.281], [-0.215, 0.274]], 0.003, 0.84);
+      // Rear: one light bar right across the trunk, swelling into blade-shaped corner lamps that run
+      // forward along the rear fenders; LEXUS lettering above; black lower bumper, twin round pipes.
+      // Smoked lamp housings with the red light strips inside them.
+      c.rear('dark', [[0, 0.878], [0.5, 0.89], [0.72, 0.895], [0.75, 0.875], [0.735, 0.8], [0.711, 0.768], [0.62, 0.8], [0.555, 0.835], [0.4, 0.856], [0, 0.862]]);
+      c.rear('tail', [[0, 0.871], [0.4, 0.866], [0.555, 0.845], [0.69, 0.79], [0.745, 0.87], [0.752, 0.86], [0.716, 0.775], [0.62, 0.808], [0.555, 0.836], [0.4, 0.857], [0, 0.863]], 0.016);
+      c.side('dark', [[-2.19, 0.89], [-2.0, 0.887], [-1.85, 0.882], [-1.76, 0.877], [-1.85, 0.857], [-1.95, 0.846], [-2.05, 0.83], [-2.08, 0.8], [-2.09, 0.758], [-2.13, 0.81], [-2.18, 0.85]]);
+      c.side('tail', [[-2.17, 0.876], [-1.88, 0.872], [-1.88, 0.864], [-2.05, 0.852], [-2.17, 0.858]], 0.01);
+      for (const x of [-0.19, -0.095, 0, 0.095, 0.19]) c.rearMid('chrome', rect(x - 0.017, 0.943, x + 0.017, 0.961), 0.014);
+      c.rear('dark', [[0.552, 0.85], [0.56, 0.85], [0.56, 0.7], [0.53, 0.665], [0.52, 0.672], [0.552, 0.704]], 0.013);
+      c.rearMid('dark', rect(-0.52, 0.66, 0.52, 0.666), 0.013);
+      c.rearMid('dark', [[-0.55, 0.545], [0.55, 0.545], [0.66, 0.525], [0.69, 0.48], [0.665, 0.36], [0.63, 0.29], [-0.63, 0.29], [-0.665, 0.36], [-0.69, 0.48], [-0.66, 0.525]]);
+      c.rear('dark', [[0.63, 0.29], [0.66, 0.31], [0.8, 0.31], [0.82, 0.28], [0.63, 0.27]]);
+      c.rearMid('lens', rect(-0.58, 0.4, 0.58, 0.42), 0.016);
+      c.rear('tail', [[0.615, 0.4], [0.64, 0.4], [0.665, 0.52], [0.64, 0.52]], 0.015);
+      c.side('dark', [[-2.34, 0.54], [-2.25, 0.46], [-2.1, 0.375], [-1.95, 0.3], [-1.8, 0.24], [-1.72, 0.205], [-1.85, 0.205], [-2.05, 0.215], [-2.25, 0.235], [-2.34, 0.26]]);
+      c.plate(0.76);
+      c.rear('chrome', ellipse(0.5, 0.315, 0.052, 0.036, 12), 0.014);
+      c.rear('dark', ellipse(0.5, 0.315, 0.04, 0.026, 12), 0.016);
     },
   },
   legacy: {
     brand: 'Subaru', name: 'Legacy', color: 0x9aa0a6, desc: 'All-wheel drive, grips anything',
-    len: 4.84, width: 1.84, wheelR: 0.335, tireW: 0.225, axles: [1.4, -1.35], round: 0.18, fin: -1.1,
-    section: { shoulder: 0.64, belt: 0.05, tuck: 0.07, crease: 1.45, crown: 0.028, gap: 0.05 },
-    side: [[2.42, 0.3, 0.68], [2.25, 0.2, 0.82], [1.7, 0.2, 0.9], [1.05, 0.2, 0.94], [-0.5, 0.21, 0.97], [-1.75, 0.22, 1.02], [-2.3, 0.25, 1.02], [-2.42, 0.33, 0.9]],
-    plan: [[2.42, 0.74], [2.25, 0.87], [1.7, 0.92], [-1.8, 0.92], [-2.3, 0.88], [-2.42, 0.8]],
-    cabin: [[1.05, 0.95, 0.74], [0.3, 1.46, 0.68], [-0.85, 1.5, 0.68], [-1.45, 1.38, 0.7], [-1.85, 1.03, 0.8]],
-    // Upright, airy six-window glass house with chrome trim.
-    windows: { belt: 0.04, top: 0.06, trim: true, bands: [{ u0: 0.9, u1: -1.64, k0: 0.64, k1: 0.75 }], pillars: [-0.3, -1.26] },
-    windshield: [1.02, 0.32], backlight: [-1.4, -1.82],
-    rim: { n: 5, style: 'twin', color: 0xb9bec5 },
-    doors: [0.9, -0.3, -1.32], handles: [-0.17, -1.2],
+    // 2025 Subaru Legacy, the last model year (production ended in 2025; subaru.ca no longer lists it).
+    // Subaru's 2025 Legacy spec sheet: 4854 long, 1839 wide, 1501 tall, wheelbase 2751, overhangs
+    // 1026/1080, track 1580/1610; Limited trim, 225/50R18. Shaped on Subaru's 360-degree studio
+    // images of the 2025 Legacy Limited (subaru.com).
+    len: 4.85, width: 1.84, wheelR: 0.341, tireW: 0.225, axles: [1.4, -1.35], round: 0.1, fin: -1.02, nose: 0.1, tail: 0.1,
+    section: { shoulder: 0.62, belt: 0.06, tuck: 0.07, crease: 1.5, crown: 0.03, flare: 0.01, gap: 0.045, rocker: false },
+    side: [
+      [2.415, 0.29, 0.53], [2.39, 0.22, 0.62], [2.36, 0.19, 0.67], [2.32, 0.175, 0.74], [2.28, 0.18, 0.79], [2.22, 0.2, 0.838],
+      [2.12, 0.205, 0.876], [2.0, 0.205, 0.908], [1.85, 0.205, 0.94], [1.7, 0.205, 0.96], [1.5, 0.2, 0.983], [1.3, 0.2, 1.0],
+      [1.15, 0.2, 1.005], [0.95, 0.2, 0.978], [0.6, 0.2, 0.978], [0.2, 0.2, 0.998], [-0.4, 0.2, 1.033], [-1.0, 0.2, 1.063],
+      [-1.3, 0.2, 1.08], [-1.6, 0.21, 1.105], [-1.8, 0.225, 1.12], [-2.0, 0.24, 1.126], [-2.1, 0.255, 1.123], [-2.2, 0.27, 1.115],
+      [-2.28, 0.29, 1.108], [-2.33, 0.3, 1.09], [-2.36, 0.31, 1.04], [-2.385, 0.32, 0.8], [-2.42, 0.34, 0.66], [-2.44, 0.38, 0.55],
+    ],
+    plan: [
+      [2.415, 0.22], [2.39, 0.36], [2.36, 0.46], [2.32, 0.57], [2.27, 0.67], [2.2, 0.77], [2.12, 0.84], [2.0, 0.89], [1.85, 0.91], [1.7, 0.918], [1.0, 0.915],
+      [0.0, 0.91], [-1.0, 0.915], [-1.5, 0.92], [-1.9, 0.912], [-2.1, 0.895], [-2.2, 0.855], [-2.26, 0.79], [-2.3, 0.7], [-2.34, 0.58], [-2.37, 0.46], [-2.4, 0.36], [-2.43, 0.27], [-2.44, 0.2],
+    ],
+    cabin: [
+      [1.15, 1.005, 0.69], [1.02, 1.051, 0.675], [0.92, 1.109, 0.665], [0.72, 1.225, 0.645], [0.52, 1.326, 0.63], [0.32, 1.419, 0.62],
+      [0.12, 1.462, 0.615], [-0.18, 1.489, 0.61], [-0.38, 1.493, 0.61], [-0.58, 1.489, 0.61], [-0.78, 1.473, 0.612], [-0.98, 1.45, 0.615],
+      [-1.18, 1.405, 0.62], [-1.38, 1.345, 0.63], [-1.58, 1.278, 0.64], [-1.78, 1.196, 0.655], [-1.98, 1.118, 0.67], [-2.02, 1.115, 0.675],
+    ],
+    // Six-light glass house in black frames (the 2025 Legacy has no chrome window trim): a division
+    // bar in the rear door and a small pointed quarter window behind it; the belt rises to the back.
+    windows: {
+      belt: 0.012, top: 0.05, bands: [{ u0: 0.95, u1: -1.52, k0: 0.63, k1: 0.59 }], pillars: [-0.28],
+      kick: [[-1.28, 0], [-1.36, 0.012], [-1.45, 0.045], [-1.52, 0.09]],
+      extra: [{ u0: -0.94, u1: -0.98, k0: 40, k1: 40, mat: 'dark', off: 0.016 }, { u0: -1.29, u1: -1.31, k0: 40, k1: 40, mat: 'dark', off: 0.016 }],
+    },
+    windshield: [1.12, 0.15], backlight: [-1.05, -1.98],
+    rim: { n: 10, style: 'multi', color: 0xb7bcc2 },
+    doors: [0.95, -0.22, -1.285], handles: [-0.05, -1.1], handleMat: 'paint',
+    mirror: { u: 0.66, dy: -0.05 },
     stats: { top: 0.98, accel: 1.0, grip: 1.25 },
     details(c) {
-      // Hexagon grille with a chrome wing and the blue six-star oval.
-      c.frontMid('grille', [[-0.4, 0.7], [0.4, 0.7], [0.5, 0.56], [0.4, 0.42], [-0.4, 0.42], [-0.5, 0.56]]);
-      c.frontMid('chrome', rect(-0.62, 0.585, 0.62, 0.612), 0.018);
-      c.frontMid('chrome', ellipse(0, 0.6, 0.095, 0.055), 0.021);
-      c.frontMid('badge', ellipse(0, 0.6, 0.08, 0.042), 0.024);
-      c.front('lens', [[0.5, 0.72], [0.86, 0.77], [0.9, 0.7], [0.62, 0.6], [0.52, 0.62]]);
-      // Subaru's C-shaped LED running lights.
-      c.front('head', [[0.6, 0.705], [0.86, 0.745], [0.87, 0.725], [0.62, 0.69]], 0.018);
-      c.front('head', [[0.84, 0.66], [0.875, 0.67], [0.88, 0.74], [0.85, 0.74]], 0.018);
-      c.front('head', [[0.64, 0.625], [0.85, 0.665], [0.85, 0.645], [0.65, 0.608]], 0.018);
-      c.frontMid('grille', [[-0.5, 0.26], [0.5, 0.26], [0.55, 0.38], [-0.55, 0.38]]);
-      c.front('dark', [[0.66, 0.3], [0.82, 0.32], [0.84, 0.44], [0.68, 0.42]]);
-      // C-shaped tail lights joined by chrome.
-      c.rear('tail', [[0.45, 1.0], [0.87, 1.0], [0.88, 0.84], [0.45, 0.85], [0.45, 0.885], [0.82, 0.88], [0.82, 0.96], [0.45, 0.965]]);
-      c.rearMid('chrome', rect(-0.45, 0.915, 0.45, 0.935));
-      c.rearMid('dark', [[-0.72, 0.3], [0.72, 0.3], [0.68, 0.42], [-0.68, 0.42]]);
-      c.plate(0.66);
-      for (const s of [-1, 1]) c.pipe(s * 0.52, 0.36);
+      // Front, 2023+ facelift: a big black hexagonal grille with gunmetal slats and a dark wing bar
+      // carrying the blue six-star oval; slim swept headlights with the C-shaped running light; black
+      // C-shaped fog-lamp frames in the corners and a wide black intake below.
+      const grille = [[0, 0.8], [0.45, 0.795], [0.53, 0.775], [0.57, 0.715], [0.48, 0.575], [0.4, 0.455], [0.35, 0.43], [0, 0.43]];
+      c.frontMid('grille', [...grille, ...grille.slice(1, -1).reverse().map(([x, y]) => [-x, y])], 0.014);
+      for (const [y, w] of [[0.625, 0.5], [0.565, 0.46], [0.505, 0.42]]) c.frontMid('lens', rect(-w, y - 0.007, w, y + 0.007), 0.017);
+      c.front('lens', [[0.07, 0.703], [0.3, 0.71], [0.5, 0.718], [0.64, 0.724], [0.65, 0.742], [0.5, 0.738], [0.3, 0.731], [0.07, 0.726]], 0.018);
+      c.frontMid('chrome', ellipse(0, 0.7, 0.085, 0.05, 12), 0.02);
+      c.frontMid('badge', ellipse(0, 0.7, 0.074, 0.041, 12), 0.022);
+      c.frontMid('chrome', [[-0.045, 0.705], [-0.025, 0.711], [-0.019, 0.73], [-0.013, 0.711], [0.007, 0.705], [-0.013, 0.699], [-0.019, 0.68], [-0.025, 0.699]], 0.024);
+      c.frontMid('chrome', [[0.005, 0.69], [0.05, 0.69], [0.05, 0.703], [0.005, 0.703]], 0.024);
+      c.front('lens', [[0.44, 0.75], [0.6, 0.805], [0.8, 0.86], [0.83, 0.86], [0.83, 0.755], [0.7, 0.726], [0.55, 0.724]]);
+      c.front('head', [[0.6, 0.728], [0.75, 0.738], [0.83, 0.762], [0.852, 0.81], [0.842, 0.812], [0.82, 0.77], [0.75, 0.747], [0.6, 0.737]], 0.018);
+      c.front('chrome', [[0.66, 0.785], [0.74, 0.792], [0.74, 0.812], [0.66, 0.806]], 0.017);
+      c.front('dark', [[0.62, 0.53], [0.83, 0.535], [0.8, 0.47], [0.64, 0.49]]);
+      c.front('dark', [[0.8, 0.47], [0.83, 0.535], [0.83, 0.28], [0.76, 0.28], [0.67, 0.32], [0.8, 0.385]]);
+      c.front('chrome', [[0.805, 0.34], [0.855, 0.335], [0.86, 0.375], [0.81, 0.38]], 0.017);
+      c.frontMid('grille', [[-0.58, 0.365], [0.58, 0.365], [0.52, 0.3], [0.42, 0.24], [-0.42, 0.24], [-0.52, 0.3]]);
+      // The headlights wrap round onto the front fenders.
+      c.side('lens', [[1.72, 0.905], [1.8, 0.89], [1.9, 0.87], [2.0, 0.85], [2.1, 0.82], [2.2, 0.79], [2.28, 0.76], [2.28, 0.72], [2.2, 0.72], [2.1, 0.73], [2.0, 0.75], [1.95, 0.78], [1.85, 0.82], [1.78, 0.86]]);
+      c.side('head', [[1.95, 0.775], [2.0, 0.748], [2.1, 0.728], [2.2, 0.718], [2.2, 0.727], [2.1, 0.737], [2.0, 0.757]], 0.009);
+      // Rear: wedge-shaped tail lamps with a red C round a clear centre, wrapping onto the fenders;
+      // the blue oval on the trunk lid, SUBARU and LEGACY lettering, a black lower bumper.
+      c.rear('dark', [[0.35, 0.99], [0.6, 1.02], [0.8, 1.038], [0.8, 0.878], [0.7, 0.878], [0.55, 0.915], [0.44, 0.96]]);
+      c.rear('tail', [[0.4, 0.993], [0.55, 1.008], [0.55, 1.0], [0.42, 0.988]], 0.016);
+      c.rear('tail', [[0.55, 1.008], [0.84, 1.032], [0.84, 1.002], [0.55, 0.99]], 0.016);
+      c.rear('tail', [[0.8, 1.01], [0.845, 1.01], [0.845, 0.886], [0.8, 0.9]], 0.016);
+      c.rear('tail', [[0.62, 0.912], [0.7, 0.886], [0.845, 0.886], [0.845, 0.906], [0.72, 0.906], [0.66, 0.918]], 0.016);
+      c.rear('lens', [[0.52, 0.968], [0.8, 0.995], [0.8, 0.92], [0.66, 0.93]], 0.015);
+      c.side('dark', [[-2.36, 1.0], [-2.2, 1.005], [-2.0, 1.0], [-1.96, 0.99], [-2.05, 0.93], [-2.2, 0.87], [-2.36, 0.86]]);
+      c.side('tail', [[-2.35, 0.992], [-2.0, 0.993], [-1.975, 0.987], [-2.0, 0.979], [-2.25, 0.978], [-2.25, 0.875], [-2.35, 0.87]], 0.009);
+      c.rear('dark', [[0, 0.712], [0.35, 0.719], [0.5, 0.742], [0.585, 0.787], [0.625, 0.875], [0.617, 0.875], [0.577, 0.792], [0.496, 0.749], [0.348, 0.726], [0, 0.719]], 0.013);
+      c.rearMid('chrome', ellipse(0, 1.065, 0.07, 0.042, 12), 0.016);
+      c.rearMid('badge', ellipse(0, 1.065, 0.06, 0.034, 12), 0.018);
+      for (const x0 of [-0.555, 0.33]) for (let k = 0; k < 6; k++) c.rearMid('chrome', rect(x0 + k * 0.031, 0.813, x0 + k * 0.031 + 0.022, 0.829), 0.014);
+      const bumper = [[0, 0.44], [0.3, 0.447], [0.45, 0.47], [0.6, 0.5], [0.78, 0.515], [0.78, 0.3]];
+      c.rearMid('dark', [...bumper, ...bumper.slice(1).reverse().map(([x, y]) => [-x, y])]);
+      c.side('dark', [[-2.44, 0.5], [-2.36, 0.5], [-2.3, 0.45], [-2.25, 0.38], [-2.18, 0.31], [-2.44, 0.31]]);
+      c.plate(0.875);
     },
   },
   carnival: {
@@ -1095,7 +1175,9 @@ function buildParts(d, fn) {
   };
 
   const nrm = new THREE.Vector3();
-  const WRAP_DEPTH = d.wrap ?? 0.32; // how far back from the bumper tips decals may wrap (m)
+  // How far back from the bumper tips a front/rear decal may wrap round the corners (m;
+  // opt-in per car: `wrap`).
+  const WRAP_DEPTH = d.wrap ?? 0.32;
   const decal = (mat, pts, front, off, mirror) => {
     const cache = new Map();
     const map = (x, y) => {
@@ -1164,11 +1246,65 @@ function buildParts(d, fn) {
     }
   };
 
+  // A decal on the body's flanks, given as an [u, y] outline for the right-hand side (mirrored):
+  // for lights that wrap far along the fenders. Each point is pushed out to the body (or glass
+  // house) surface and lifted off it by `off` along the normal. With `shade`, a 'paint' decal is
+  // that much darker (a vertex colour), to suggest a sculpted, shadowed panel.
+  const sideX = (u, y) => Math.max(fn.bodyX(u, y), fn.ghX(u, y));
+  const sideDecal = (mat, pts, off, shade) => {
+    const contour = pts.map(([u, y]) => new THREE.Vector2(u, y));
+    const faces = THREE.ShapeUtils.triangulateShape(contour, []);
+    // Point on the surface, with the surface's own normal (smooth, so reflections don't facet).
+    const P = (u, y, s) => {
+      const x = sideX(u, y);
+      if (!(x > 0)) return null;
+      const h = 0.01;
+      const slope = (a, b) => (a > 0 && b > 0 ? (a - b) / (2 * h) : 0);
+      const n = new THREE.Vector3(1, -slope(sideX(u, y + h), sideX(u, y - h)), slope(sideX(u + h, y), sideX(u - h, y))).normalize();
+      return { p: [s * (x + n.x * off), y + n.y * off, -u + n.z * off], n: [s * n.x, n.y, n.z] };
+    };
+    const a0 = new THREE.Vector3();
+    const ab = new THREE.Vector3();
+    const ac = new THREE.Vector3();
+    for (const s of [1, -1]) {
+      const pos = [];
+      const nor = [];
+      for (const [ia, ib, ic] of faces) {
+        const A = contour[ia], B = contour[ib], C = contour[ic];
+        // Pieces about 10 cm long hug the gently curved flanks closely enough.
+        const S = Math.min(6, Math.max(1, Math.ceil(Math.max(A.distanceTo(B), B.distanceTo(C), C.distanceTo(A)) / 0.1)));
+        const at = (i, j) => [A.x + ((B.x - A.x) * i + (C.x - A.x) * j) / S, A.y + ((B.y - A.y) * i + (C.y - A.y) * j) / S];
+        for (let i = 0; i < S; i++) {
+          for (let j = 0; j < S - i; j++) {
+            const cells = [[at(i, j), at(i + 1, j), at(i, j + 1)]];
+            if (j < S - i - 1) cells.push([at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)]);
+            for (const cell of cells) {
+              const v = cell.map(([u, y]) => P(u, y, s));
+              if (!v.every(Boolean)) continue;
+              a0.fromArray(v[0].p);
+              ab.fromArray(v[1].p).sub(a0);
+              ac.fromArray(v[2].p).sub(a0);
+              const order = ab.cross(ac).x * s >= 0 ? [0, 1, 2] : [0, 2, 1];
+              for (const o of order) { pos.push(...v[o].p); nor.push(...v[o].n); }
+            }
+          }
+        }
+      }
+      if (!pos.length) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      if (shade != null) g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(pos.length).fill(shade), 3));
+      add(mat, g);
+    }
+  };
+
   const ctx = {
     front: (mat, pts, off = 0.012) => decal(mat, pts, true, off, true),
     frontMid: (mat, pts, off = 0.012) => decal(mat, pts, true, off, false),
     rear: (mat, pts, off = 0.012) => decal(mat, pts, false, off, true),
     rearMid: (mat, pts, off = 0.012) => decal(mat, pts, false, off, false),
+    side: (mat, pts, off = 0.006, shade) => sideDecal(mat, pts, off, shade),
     plate(y) {
       decal('dark', rect(-0.18, y - 0.095, 0.18, y + 0.095), false, 0.012, false);
       decal('plate', rect(-0.16, y - 0.08, 0.16, y + 0.08), false, 0.018, false);
@@ -1229,28 +1365,30 @@ function buildParts(d, fn) {
       add('dark', triMesh(tris, new THREE.Vector3(s, 0, 0)));
     }
   }
+  // Handles are chrome unless the car says otherwise (`handleMat`, e.g. 'paint').
   for (const u of d.handles || []) {
     for (const s of [-1, 1]) {
       const y = fn.top(u) - 0.11;
       const handle = new THREE.CapsuleGeometry(0.016, 0.13, 4, 8).rotateX(Math.PI / 2);
-      add('chrome', handle.translate(s * (fn.bodyX(u, y) + 0.008), y, -u));
+      add(d.handleMat || 'chrome', handle.translate(s * (fn.bodyX(u, y) + 0.008), y, -u));
     }
   }
 
   // Mirrors: a rounded shell on a short arm at the bottom corner of the side glass.
-  // Optional per model, d.mirror: { mat (shell material, default paint), dx / dy (move it out / up, m) }.
-  const M = d.mirror || {};
+  // Opt-in per car: `mirror: { u, mat, dx, dy }`: where along the car (default 0.3 m behind
+  // the windshield base), the shell's material (default paint), and moves out / up (m).
+  const mirror = d.mirror || {};
   for (const s of [-1, 1]) {
-    const u = fn.cFront - 0.3;
+    const u = mirror.u ?? fn.cFront - 0.3;
     const yBase = fn.top(u) + 0.02;
     const x = fn.ghX(u, yBase + 0.05);
-    const y = yBase + 0.1 + (M.dy || 0);
-    const dx = M.dx || 0;
+    const y = yBase + 0.1 + (mirror.dy ?? 0);
+    const dx = mirror.dx ?? 0;
     const shell = new THREE.SphereGeometry(0.1, 14, 10).scale(1.05, 0.62, 0.55);
-    add(M.mat || 'paint', shell.translate(s * (x + 0.17 + dx), y, -u));
+    add(mirror.mat || 'paint', shell.translate(s * (x + 0.17 + dx), y, -u));
     add('dark', new THREE.CircleGeometry(0.088, 14).scale(1.05, 0.58, 1).translate(s * (x + 0.17 + dx), y, -u + 0.052));
     const arm = new THREE.BoxGeometry(0.16 + dx, 0.05, 0.09);
-    add(M.mat || 'paint', arm.translate(s * (x + 0.07 + dx / 2), y - 0.04, -u));
+    add(mirror.mat || 'paint', arm.translate(s * (x + 0.07 + dx / 2), y - 0.04, -u));
   }
 
   // Brake discs and calipers behind the spokes (they don't turn with the wheel).

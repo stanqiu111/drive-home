@@ -25,6 +25,8 @@ npm run dev        # http://localhost:5173
 npm run build      # checks road lines, then builds into dist/
 npm run check:roads # road-line check on every map (see "Road lines")
 npm run preview    # serve the production build
+node tools/build-maps.mjs [id]   # rebuild maps (see "Map data")
+node tools/build-osm-tiles.mjs   # refresh public/osm/ from the Alberta .pbf (see "Map data")
 ```
 
 - Needs Node `^20.19` or `>=22.12` (Vite 8).
@@ -75,19 +77,26 @@ npm run preview    # serve the production build
 - `sound-samples.js`: generated list of where each recorded loop sits in `public/sounds/*.m4a`, its rpm and length. Don't edit by hand (see "Sounds").
 - `sound-studio.html` (dev page, `/sound-studio.html`): buttons for every sound, hold-to-honk horns, an engine panel (vehicle, speed, gas, nitro, drift…) with a **Recorded / Synth** switch, a scripted test drive (idle, revs, full throttle through the gears, nitro, lift off with blow-off, drift, braking), turbo-spool and squeal buttons, and "Run the check", which renders each sound offline and reports peak, loudness, clean starts/ends, clean loop seams and smooth rpm crossfades. Use it after changing sounds.
 - `leaderboard.js`, `supabase.js`: online features.
+- `custom-route.js`: the "Your routes" feature (see "Custom routes"): the builder screen (address search, route preview, progress bar), saving maps on the device (IndexedDB) and loading them back.
+- `mapgen/`: the map builder, shared by `tools/build-maps.mjs` (Node) and the custom-route builder (browser). `core.js` is all the building logic (`buildMapData`, projection, lane cleaning, structures, buildings, signals), `osm-tiles.js` reads the OpenStreetMap tiles in `public/osm/`, `dem.js` reads NRCan terrain, `edmonton.js` has the city limits and route limits, `worker.js` runs a custom build in a background thread.
+- `car-studio.html` (dev page, `/car-studio.html?id=crv`): one car from six angles (`ortho=1` for front/side/rear/top with a 0.5 m grid, `traffic=1`, `far=1`), with its measured size in `window.info`. Screenshot it with `node tools/dev/studio-shot.mjs "<url>" out.png`. Use it to compare a car with the maker's official photos.
 
-## Map data (`tools/build-maps.mjs`)
+## Map data (`tools/build-maps.mjs`, `src/mapgen/`)
 
-- Run `node tools/build-maps.mjs [id]`. It writes `public/maps/<id>.json` and `index.json`, which are committed.
+- Run `node tools/build-maps.mjs [id]`. It writes `public/maps/<id>.json` and `index.json`, which are committed. The building logic lives in `src/mapgen/core.js` (shared with custom routes); `build-maps.mjs` only fetches, caches and writes. After any change to `core.js`, rebuild all maps and look at `git diff --stat public/maps`: a refactor must leave every map byte for byte the same.
 - All sources are free and need no keys:
   - routes from the OSRM demo server
-  - roads from OpenStreetMap (Geofabrik Alberta extract)
+  - roads, railways, traffic signals and named places from OpenStreetMap, read from the tiles in `public/osm/`
   - buildings from City of Edmonton Rooflines (SODA dataset `jpxi-a9a5`)
-  - terrain from NRCan MRDEM-30
-- It needs `tools/cache/alberta-latest.osm.pbf` (about 350 MB), from https://download.geofabrik.de/north-america/canada/alberta-latest.osm.pbf. `tools/cache/` is gitignored; the other downloads cache there automatically.
-- `tools/cache/` is not in git; on a new computer it starts empty. The builder re-downloads routes, buildings, zoning and terrain by itself. The 350 MB `.pbf` is only read once to make `osm-corridor.json`, so it's needed only when that file is missing or must be re-extracted, for example after adding tags to `WAY_KEYS` such as `railway` for the hump fix. Download it by hand from the link above. A fresh download has newer OpenStreetMap data, so rebuilt maps may differ slightly.
+  - zoning from City of Edmonton (`fixa-tstc`)
+  - terrain from NRCan MRDEM-30 (a cloud-optimised GeoTIFF on S3, read with range requests)
+- **OpenStreetMap tiles** (`public/osm/`, committed, about 57 MB in 734 files): all of Edmonton plus ~4.5 km, cut into 0.025° × 0.015° tiles by `node tools/build-osm-tiles.mjs` (about 30 s). Each tile holds every kept way touching it (roads, buildings, land-use areas with `WAY_KEYS` tags; railways), the traffic-signal nodes and the named places (`POI_KEYS`: shops, restaurants, gas stations…). Format: top of `src/mapgen/osm-tiles.js`. The builder and the game read the same tiles, so built-in and custom maps get the same data. Public Overpass servers turn browsers away (HTTP 406), which is why the game serves this data itself.
+- The tiles come from `tools/cache/alberta-latest.osm.pbf` (about 350 MB, https://download.geofabrik.de/north-america/canada/alberta-latest.osm.pbf). It's needed only to refresh the tiles: after changing what is kept (`WAY_KEYS`, `RAIL_KEYS`, `POI_KEYS`, `osmWayKind`, `isRail`, `isPoi`) or to pick up newer OpenStreetMap data; then rebuild every map. Regenerating adds ~20 MB to the git history each time, so don't do it casually. The old `osm-corridor.json` / `osm-rail.json` caches are no longer used.
+- `tools/cache/` is not in git; on a new computer it starts empty. The builder re-downloads routes, buildings and zoning by itself (terrain is never cached).
+- **Business names and brands**: each named OpenStreetMap place lends its name, brand and kind to the footprint it stands in. Buildings carry `n` (name; footprints over 150 m²), `br` (OSM `brand`), `k` (its amenity/shop/tourism/leisure/office value: `fast_food`, `fuel`, `bank`…) and `ps` (other named tenants, `[[name, brand, kind], …]`). Places not inside a drawn footprint and within 200 m of the road go to `pois: [{ k, n?, br?, x, z }]` (gas stations mapped as a point, kiosks).
+- A building the road passes through (its corners can be far from the road, like a mall parkade a custom route starts in) is dropped, like one whose corners are on the road.
 - Maps can have their own `start` (lon/lat) and `from` label; the two downtown maps start on 107 St by the Legislature (a public street). Raised structures are decided here (see "Road structures"). Railways come from a separate one-time pass over the `.pbf` (`tools/cache/osm-rail.json`).
-- Side roads are kept only on the map's own ground (`clipRoadsToGround`: within `TERRAIN_RADIUS` + 100 m of the route). The OSM extract holds the streets along every route, and the game can't draw roads off its terrain anyway; without this each map file carried ~1,000 km of roads it had to index on every load.
+- Side roads are kept only on the map's own ground (`clipRoadsToGround`: within `TERRAIN_RADIUS` + 100 m of the route). OpenStreetMap ways are first kept near the routes (`osmNearRoutes`: roads within ~550 m, buildings ~450 m, railways 300 m). For the built-in maps that filter uses all eight routes together (as the old corridor extract did), so a built-in map also shows far side streets where another route passes nearby; a custom map uses only its own route.
 - Building classes come from OSM tags, then City of Edmonton zoning polygons (`fixa-tstc`, cached per map), then OSM land use, then size. Footprints under a landmark's `excludeR` are dropped. Named buildings keep their OSM name (`n`) for signs.
 - **Adding a map:** add it to `MAPS` in `tools/build-maps.mjs` and to `MAP_INFO` in `src/main.js`, rebuild, then add its id to BOTH `map in (...)` checks in `supabase/schema.sql` and re-run the SQL; otherwise posting times on that map fails.
 - **Adding a landmark:** add an entry to `src/landmark-list.js`, write `src/landmarks/<id>.js`, check it with `landmark-studio.html`, then rebuild the maps so footprints under it are dropped and the route callout is written.
@@ -114,6 +123,23 @@ The owner asked for real engine sounds ("turbo speed sound is not real, find a r
 | Blow-off valve and nitro burst: compressed-air line released | [release_air_pffft](https://freesound.org/people/reg7783/sounds/131302/) | reg7783 | CC0 |
 
 - Not found as CC0 and therefore not used: a clean V6 (the six is a straight six, which shares the V6's firing rhythm), a real blow-off valve (a compressed-air release stands in) and a clean electric-motor whine (the Model X whine stays synthesised, quietly, over the real Tesla recording).
+
+## Custom routes (`src/custom-route.js`, `src/mapgen/`)
+
+The owner asked for "a customized route, but have to be inside of edmonton … when user input both start and end address, with a progress bar build your map, need match quality with current route". In the menu, "Your routes" → **New route**:
+
+1. The player types a start and a finish. Suggestions come from Photon (komoot) as they type; Enter falls back to Nominatim (its rules forbid search-as-you-type). Both are limited to Edmonton's box, and anything outside the city limits (`insideEdmonton`, OSM relation 2564500) is dropped. "53.52, -113.62" also works.
+2. OSRM plans the drive; the screen shows a north-up preview and the distance. Routes must be 1-50 km (`CUSTOM_MIN_KM`, `CUSTOM_MAX_KM` in `edmonton.js`).
+3. **Build this map** starts `src/mapgen/worker.js` in a background thread with a progress bar: OpenStreetMap tiles along the route from the game's own `public/osm/`, then `buildMapData()` (the same function the built-in maps use) with City rooflines and zoning and NRCan terrain downloaded live. A 10 km route takes about 5 s, 39 km about 12 s.
+4. The map is saved in IndexedDB (`driveHome` database: `customMeta` for the menu, `customData` for the map files; at most 12, oldest dropped) and selected. Custom ids start with `custom-`.
+
+Rules:
+- **One builder.** Never copy or fork building logic into the browser: change `src/mapgen/core.js`, rebuild the built-in maps (they must stay the same unless the change is meant for them too), and custom maps follow. Tested 2026-10-10: a custom build of the Odd Burger route matched `burger.json` in every field except the far side streets explained under "Map data".
+- **Privacy.** Typed places only go to Photon/Nominatim and OSRM, and the map to the City/NRCan services as boxes; everything stays on the device. Custom routes have no online leaderboard (`showResult` skips it) and finishing one counts as map `custom` in the achievements stats. Never test with anyone's home address; use public places.
+- Each custom map is projected around its own start (`makeProjection(start)`), which is how `landmarks.js` places landmarks; the built-in maps keep the global Summerside projection, so they don't change.
+- If the City's data service is down, the map is still built with OpenStreetMap buildings and a note in the route's panel. If terrain or routing is down, the builder says so.
+- The finish banner shows the destination; the ending scene is picked from what the destination is (`endingFor`: food → burger/noodles, shops → shopping, water → beach, ski → ski, else BBQ; video games stay Downtown's own). The Walterdale arches go over any route's bridge run within 150 m of the real bridge.
+- Test with real clicks: `[data-new-route]`, type into `#cr-from`/`#cr-to`, click a `.cr-opt`, click `#cr-build`, wait for `#custom-screen` to close. `window.__game` is dev-only, so on a production preview wait on the page instead.
 
 ## Road lines (rule: don't break them again)
 
@@ -159,6 +185,7 @@ The DEM is bare earth, so bridges and overpasses have to be made up. On 2026-10-
 
 - There are no unit tests. Check changes by running the dev server and driving the game with headless Chrome (puppeteer-core, a dev dependency) and screenshots. Use `window.__game` to jump along the route (`S.s`), start races and finish.
 - `node tools/dev/shots.mjs <map> <s,s,...>` saves a driver's view and a high view at each route position and prints fps. Write other throwaway test scripts outside the repo.
+- `node tools/dev/studio-shot.mjs "<url>" out.png` screenshots a dev page that sets `window.ready` (car-studio, landmark-studio).
 - Test UI through real clicks. A past bug deleted the Start button handlers, and tests that started races via the hook didn't notice.
 - After world or car changes, check fps and map switching on the biggest maps (`home`, `sherwood`); see "Performance".
 

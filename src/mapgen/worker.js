@@ -73,18 +73,23 @@ async function build({ id, name, from, to, start, dest, coords }) {
   const m = { id, name, from, start, dest };
   const span = (a, b) => (f) => a + (b - a) * f;
   const overall = span(0.22, 1);
+  // If the City's open-data service is down, the map is still built: buildings then come
+  // from OpenStreetMap alone (as outside the city limits), styled without zoning.
+  const notes = [];
   const { out, meta } = await buildMapData(m, pts, osm, {
     proj,
-    sampleDEM,
     log: () => {},
     progress: (f, label) => progress(overall(f), label),
+    sampleDEM: (points) => sampleDEM(points).catch(() => {
+      throw new Error('The terrain service (Natural Resources Canada) did not answer. Try again in a moment.');
+    }),
     rooflines: (mm, p) => loadRooflines(p, getJSON, {
       proj, parallel: 4,
       tick: (d, n) => progress(overall(0.5 + 0.25 * (d / n)), `Downloading the buildings (${d}/${n})`),
-    }),
-    zoning: (mm, p) => loadZoning(p, getJSON, { proj }),
+    }).catch(() => { notes.push('City building data was unavailable: buildings come from OpenStreetMap.'); return []; }),
+    zoning: (mm, p) => loadZoning(p, getJSON, { proj }).catch(() => { notes.push('City zoning was unavailable.'); return []; }),
   });
-  out.custom = { to, created: Date.now() };
+  out.custom = { to, created: Date.now(), ...(notes.length ? { notes } : {}) };
   meta.to = to;
   return { out, meta };
 }

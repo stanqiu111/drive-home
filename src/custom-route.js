@@ -294,7 +294,7 @@ async function planRoute() {
     const route = j.routes[0];
     const km = route.distance / 1000;
     if (km < CUSTOM_MIN_KM) throw new Error(`That drive is only ${km.toFixed(1)} km. Pick places at least ${CUSTOM_MIN_KM} km apart.`);
-    if (km > CUSTOM_MAX_KM) throw new Error(`That drive is ${Math.round(km)} km. Custom routes can be up to ${CUSTOM_MAX_KM} km.`);
+    if (km > CUSTOM_MAX_KM) throw new Error(`That drive is ${km.toFixed(1)} km. Custom routes can be up to ${CUSTOM_MAX_KM} km.`);
     state.route = { coords: route.geometry.coordinates, km };
     $('cr-preview').innerHTML = `${previewSvg(route.geometry.coordinates)}
       <p>${km.toFixed(1)} km · about ${Math.max(1, Math.round(route.duration / 60))} min in normal traffic</p>`;
@@ -335,7 +335,7 @@ function build() {
       stage.textContent = `${msg.label} · ${Math.round(msg.f * 100)}%`;
     } else if (msg.type === 'done') {
       done();
-      const meta = { ...msg.meta, custom: true, created: Date.now(), from: from.short, to: to.short, ending: endingFor(to) };
+      const meta = { ...msg.meta, custom: true, created: Date.now(), from: from.short, to: to.short, ending: endingFor(to), ...(msg.out.custom?.notes ? { notes: msg.out.custom.notes } : {}) };
       try {
         await saveCustomRoute(meta, msg.out);
       } catch {

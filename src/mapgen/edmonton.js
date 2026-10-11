@@ -3,7 +3,7 @@
 // Shared by the menu (src/custom-route.js) and the builder thread (worker.js).
 
 export const CUSTOM_MIN_KM = 1;
-export const CUSTOM_MAX_KM = 40;
+export const CUSTOM_MAX_KM = 50;
 // [west, south, east, north]
 export const EDMONTON_BBOX = [-113.7139, 53.3372, -113.2714, 53.7163];
 export const EDMONTON_BOUNDARY = [

@@ -478,6 +478,7 @@ function mapDetail(m) {
     </div>
     ${!best ? `<p class="hint">Not driven yet. Real traffic takes about ${rushMin(m)} minutes.</p>` : ''}
     ${m.landmarks?.length ? `<p class="hint">Passes: ${m.landmarks.map((l) => esc2(l.name)).join(' · ')}</p>` : ''}
+    ${m.notes?.length ? `<p class="hint">${m.notes.map(esc2).join(' ')}</p>` : ''}
     ${m.custom ? `<button class="link-btn del-route" data-del-route="${m.id}" type="button">Delete this route</button>` : ''}
   </div>`;
 }

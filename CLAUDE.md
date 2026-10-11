@@ -182,12 +182,13 @@ The owner switched computers mid-task. This section is the compressed history an
 
 ### Where things are
 
-- **Live** (`main`, deployed 2026-10-09 with the owner's OK): 8 maps, landmarks, the map-select screen, building styles, store and exit signs, the online leaderboard and achievements, the road-line rewrite, the road-structure fix, signals at real junctions and the synthesized sound effects.
-- **Branch `wip/fixes-oct10`** (not live; the owner checks it locally, then says whether to deploy). It fixes the owner's 2026-10-10 list:
-  1. map switching no longer freezes the menu, plus the wider performance pass (see "Performance");
-  2. engines, turbo, blow-off and tyre squeal come from real CC0 recordings (see "Sounds");
+- **Live** (`main`): 8 maps, landmarks, the map-select screen, building styles, store and exit signs, the online leaderboard and achievements, the road-line rewrite, the road-structure fix and signals at real junctions (deployed 2026-10-09).
+- **Also live, deployed 2026-10-10 with the owner's OK:** the fixes for the owner's 2026-10-10 list:
+  1. smooth map switching and the performance pass (see "Performance");
+  2. engines, turbo, blow-off and tyre squeal from real CC0 recordings (see "Sounds");
   3. flying stays under the High Level Bridge's upper deck and under overpasses (`clearance.js`);
-  4. the road at the end of Snow Valley is visible again (no made-up bridge).
+  4. the road at the end of Snow Valley is visible again.
+- Work in progress goes on a branch, and goes live only after the owner checks it locally and says so.
 
 ### Owner to-dos
 

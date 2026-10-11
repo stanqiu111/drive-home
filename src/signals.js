@@ -82,11 +82,14 @@ export class Signals {
       // change in between. One head per lane, up to 5. `stop` comes from the real junction.
       const [inner, outer] = stopLineExtent(route.laneData, stop);
       const lanes = Math.max(1, Math.min(5, Math.round((outer - inner) / LANE_W)));
-      const right = lerpAt(route.laneData, route.laneData.right, s); // the pole stands at the signal
+      // The pole stands at the signal, but never before the far side of the crosswalk (some
+      // signal nodes in OpenStreetMap sit well before the junction).
+      const ps = Math.max(s, stop + CROSSWALK[1] + 0.4);
+      const right = lerpAt(route.laneData, route.laneData.right, ps);
       // Pole with a mast arm reaching over the lanes; one signal head per lane. Built in the
       // signal's own frame, then placed at the road edge, turned to face oncoming drivers.
-      q.setFromAxisAngle(yAxis, route.yaw(s));
-      m.compose(route.toWorld(s, right + 1.3, 0), q, one);
+      q.setFromAxisAngle(yAxis, route.yaw(ps));
+      m.compose(route.toWorld(ps, right + 1.3, 0), q, one);
       const put = (list, g) => list.push(plain(g).applyMatrix4(m));
       const armLen = lanes * LANE_W + 1.6;
       put(parts.metal, new THREE.CylinderGeometry(0.13, 0.2, 7.4, 10).translate(0, 3.7, 0));

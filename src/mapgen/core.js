@@ -13,7 +13,7 @@
 
 import { LANDMARK_LIST } from '../landmark-list.js';
 import { SKYLINE_TOWERS } from '../landmarks/skyline-data.js';
-import { LANE_W, LANE_FORMAT, TAPER_MAX, laneInput, stopLineExtent } from '../lane-layout.js';
+import { LANE_W, LANE_FORMAT, TAPER_MAX, laneInput, stopLineExtent, sideRoadMouths } from '../lane-layout.js';
 
 // The built-in maps are projected around one global origin (Summerside, 91 St SW: a public
 // spot); each map's output is then shifted so its own start sits at (0, 0). Custom routes
@@ -1487,30 +1487,14 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
     const last = sigClusters[sigClusters.length - 1];
     if (last && nd.s - last[last.length - 1].s <= 60) last.push(nd); else sigClusters.push([nd]);
   }
-  // Where side roads meet our road: [s from, s to] of each one's surface along the route.
-  const mouths = [];
-  for (const r of otherRoads) {
-    if (r.o || r.e) continue;
-    for (const end of [0, 1]) {
-      const k = end ? r.p.length - 2 : 0;
-      const kk = end ? r.p.length - 4 : 2;
-      if (kk < 0 || kk >= r.p.length) continue;
-      const ex = r.p[k] / 10, ez = r.p[k + 1] / 10;
-      const nr = index.nearest(ex, ez, 40);
-      if (!nr || Math.abs(lateral(nr.i, ex, ez)) > Math.max(right[nr.i], -left[nr.i]) + 8) continue;
-      const dx = ex - r.p[kk] / 10, dz = ez - r.p[kk + 1] / 10;
-      const l = Math.hypot(dx, dz) || 1;
-      const sin = Math.abs((dx * tz[nr.i] - dz * tx[nr.i]) / l);
-      const half = r.w / 2 / Math.max(0.35, sin);
-      mouths.push([nr.i * STEP - half, nr.i * STEP + half]);
-    }
-  }
   // The lanes as the game will read them (edges rounded as in the file), so stop lines are
   // placed where our lanes really are.
   const laneRd = laneInput({
     step: STEP, x: pts.map((q) => r2(q[0])), z: pts.map((q) => r2(q[1])), right: right.map(r1), left: left.map(r1),
     lanes, ow, ctr: ctr.some(Boolean) ? ctr : undefined, laneFormat: LANE_FORMAT,
   });
+  // Where side roads meet our road (shared with the checker).
+  const mouths = sideRoadMouths(otherRoads, laneRd);
   const signals = [];
   for (const cl of sigClusters) {
     const on = cl.filter((nd) => nd.onRoad);

@@ -134,6 +134,56 @@ export function foldCurvature(rd) {
   return k;
 }
 
+// Where side roads meet the driven road: [s from, s to] of each cross street's surface along
+// the route (overpass decks and raised embankment roads don't meet it; roads running
+// alongside aren't cross streets). The builder finds each signal's junction with this and
+// tools/check-roads.mjs checks it with the same function, so the two can't disagree (they
+// once differed by 2.4 m on a steeply skewed side street). `roads` as in a map file.
+export function sideRoadMouths(roads = [], rd) {
+  const { step } = rd;
+  const n = rd.x.length;
+  const out = [];
+  const grid = new Map();
+  for (let i = 0; i < n; i++) {
+    const k = `${Math.floor(rd.x[i] / 25)},${Math.floor(rd.z[i] / 25)}`;
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(i);
+  }
+  const nearest = (x, z) => {
+    let best = -1;
+    let bd = 40;
+    for (let a = -2; a <= 2; a++) for (let b = -2; b <= 2; b++) {
+      for (const i of grid.get(`${Math.floor(x / 25) + a},${Math.floor(z / 25) + b}`) ?? []) {
+        const d = Math.hypot(rd.x[i] - x, rd.z[i] - z);
+        if (d < bd) { bd = d; best = i; }
+      }
+    }
+    return best;
+  };
+  for (const r of roads ?? []) {
+    if (r.o || r.e || r.p.length < 4) continue;
+    for (const end of [0, 1]) {
+      const k = end ? r.p.length - 2 : 0;
+      const kk = end ? r.p.length - 4 : 2;
+      const ex = r.p[k] / 10, ez = r.p[k + 1] / 10;
+      const i = nearest(ex, ez);
+      if (i < 0) continue;
+      const a = Math.max(0, i - 2), b = Math.min(n - 1, i + 2);
+      const l0 = Math.hypot(rd.x[b] - rd.x[a], rd.z[b] - rd.z[a]) || 1;
+      const tx = (rd.x[b] - rd.x[a]) / l0, tz = (rd.z[b] - rd.z[a]) / l0;
+      const lat = (ex - rd.x[i]) * -tz + (ez - rd.z[i]) * tx;
+      if (Math.abs(lat) > Math.max(rd.right[i], -rd.left[i]) + 8) continue;
+      const dx = ex - r.p[kk] / 10, dz = ez - r.p[kk + 1] / 10;
+      const l = Math.hypot(dx, dz) || 1;
+      const sin = Math.abs((dx * tz - dz * tx) / l);
+      if (sin < 0.35) continue; // running alongside, not a cross street
+      const half = r.w / 2 / sin;
+      out.push([i * step - half, i * step + half]);
+    }
+  }
+  return out;
+}
+
 // Sample flags shared by the plan and the checker.
 export function laneZones(rd, signals = []) {
   const n = rd.right.length;

@@ -260,7 +260,10 @@ function wireField(which) {
         const r = await search(true);
         if (r.length === 1) choose(r[0]);
       }
-    } else if (e.key === 'Escape') close();
+    } else if (e.key === 'Escape') {
+      if (list.classList.contains('show')) close();
+      else if (!state.building) closeBuilder();
+    }
   });
   input.addEventListener('blur', () => setTimeout(close, 180));
   list.addEventListener('mousedown', (e) => e.preventDefault()); // keep focus while picking
@@ -328,6 +331,8 @@ function build() {
   state.worker = worker;
   const fill = $('cr-fill');
   const stage = $('cr-stage');
+  fill.style.width = '0%';
+  stage.textContent = 'Starting…';
   const done = () => { worker.terminate(); state.worker = null; };
   worker.onmessage = async (e) => {
     const msg = e.data;
@@ -346,6 +351,7 @@ function build() {
       }
       setBusy(false);
       closeBuilder();
+      resetForm(); // the next "New route" starts empty
       state.onAdded(meta);
     } else {
       done();
@@ -359,6 +365,13 @@ function build() {
     setMsg(`Building failed: ${e.message || 'unknown error'}`, true);
   };
   worker.postMessage({ id, name, from: from.short, to: to.short, start: [from.lon, from.lat], dest: [to.lon, to.lat], coords: route.coords });
+}
+
+function resetForm() {
+  Object.assign(state, { from: null, to: null, route: null });
+  for (const id of ['cr-from', 'cr-to', 'cr-name']) $(id).value = '';
+  setMsg('');
+  updateButton();
 }
 
 function closeBuilder() {

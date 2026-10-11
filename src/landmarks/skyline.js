@@ -13,12 +13,31 @@ const DEG = Math.PI / 180;
 // almost black: dark glass keeps the finish with more diffuse, light glass is 'glossy'.
 const GLASS = { metalness: 0.4, roughness: 0.3 };
 
+// Parts are merged into one mesh per finish, their colours kept per vertex (a white material
+// times the vertex colour is the same colour), so the whole skyline is a handful of draw
+// calls. Glowing parts keep a material per colour (their glow is the material's colour).
 class Parts {
-  constructor(ctx) { this.ctx = ctx; this.map = new Map(); }
+  constructor(ctx) { this.ctx = ctx; this.map = new Map(); this.c = new THREE.Color(); }
   add(geom, color, finish = 'matte') {
-    const key = `${color}|${finish}`;
-    if (!this.map.has(key)) this.map.set(key, { mat: this.ctx.mat(color, finish, finish === 'glass' ? GLASS : undefined), geoms: [] });
-    this.map.get(key).geoms.push(geom.index ? geom.toNonIndexed() : geom);
+    const glow = finish === 'glow';
+    const key = glow ? `${color}|glow` : finish;
+    if (!this.map.has(key)) {
+      const extra = { ...(finish === 'glass' ? GLASS : {}), ...(glow ? {} : { vertexColors: true }) };
+      this.map.set(key, { mat: this.ctx.mat(glow ? color : 0xffffff, finish, extra), geoms: [] });
+    }
+    const g = geom.index ? geom.toNonIndexed() : geom;
+    if (!glow) {
+      const n = g.attributes.position.count;
+      const col = new Float32Array(n * 3);
+      this.c.setHex(color);
+      for (let i = 0; i < n; i++) {
+        col[i * 3] = this.c.r;
+        col[i * 3 + 1] = this.c.g;
+        col[i * 3 + 2] = this.c.b;
+      }
+      g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    }
+    this.map.get(key).geoms.push(g);
   }
   // Box of w (east-west) x d (north-south), base at y0, centred on (x, z).
   box(w, h, d, x, y0, z, color, finish) {

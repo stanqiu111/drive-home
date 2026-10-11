@@ -850,12 +850,33 @@ function buildShape(id) {
     body.push(mirrored(section(u), u));
   }
   // Glass house sits on the belt line, narrower at the roof (tumblehome).
-  const glass = [];
-  const M = 30;
-  for (let i = 0; i < M; i++) {
-    const u = cFront + ((cBack - cFront) * i) / (M - 1);
-    const g = gh(u);
-    glass.push({ u, pts: ring(g.y0, g.y1, g.wb, g.wt, 0.02, rtG) });
+  const glassHouse = (m) => {
+    const out = [];
+    for (let i = 0; i < m; i++) {
+      const u = cFront + ((cBack - cFront) * i) / (m - 1);
+      const g = gh(u);
+      out.push({ u, pts: ring(g.y0, g.y1, g.wb, g.wt, 0.02, rtG) });
+    }
+    return out;
+  };
+  const glass = glassHouse(30);
+
+  // A coarser body for traffic far away (see makeTrafficCar): half the stations along the
+  // body and over the wheel openings; the opening edges and the rounded bumper ends keep
+  // all of theirs, so the outline and the lights stay where they were.
+  const farStations = [];
+  for (let i = 0; i < N / 2; i++) farStations.push((uFront + uBack) / 2 + ((uFront - uBack) / 2) * Math.cos((Math.PI * i) / (N / 2 - 1)));
+  for (const A of arches) {
+    for (let u = A.u - A.R - 0.06; u <= A.u + A.R + 0.06; u += 0.07) farStations.push(u);
+    farStations.push(A.u - A.R - 0.003, A.u - A.R + 0.003, A.u + A.R - 0.003, A.u + A.R + 0.003);
+  }
+  for (const c of BUMPER_C) farStations.push(uFront - nose + nose * bumperT(c), uBack + tail - tail * bumperT(c));
+  farStations.sort((a, b) => b - a);
+  const farBody = [];
+  for (const u of farStations) {
+    if (u > uFront || u < uBack) continue;
+    if (farBody.length && farBody[farBody.length - 1].u - u < 0.002) continue;
+    farBody.push(mirrored(section(u), u));
   }
 
   const fn = {
@@ -865,6 +886,8 @@ function buildShape(id) {
   const geos = {
     body: loft(body),
     glass: loft(glass),
+    farBody: loft(farBody),
+    farGlass: loft(glassHouse(15)),
     shadow: shadowFor(d, fn),
     fn,
   };
@@ -1187,6 +1210,7 @@ function buildWheel(d, fn) {
     [r - 0.014, tw / 2 - 0.01], [r - 0.05, tw / 2 + 0.008], [rimR + 0.015, tw / 2], [rimR - 0.005, tw / 2 - 0.02],
   ].map(([x, y]) => new THREE.Vector2(x, y));
   const tire = new THREE.LatheGeometry(profile, 26).rotateZ(-Math.PI / 2);
+  const farTire = new THREE.LatheGeometry(profile, 12).rotateZ(-Math.PI / 2);
 
   const make = (s) => {
     const face = [];
@@ -1224,7 +1248,7 @@ function buildWheel(d, fn) {
     }
     return { face: mergeGeometries(face.map(plain)), dark: mergeGeometries(dark.map(plain)) };
   };
-  return { tire, [-1]: make(-1), 1: make(1), color: rim.color };
+  return { tire, farTire, [-1]: make(-1), 1: make(1), color: rim.color };
 }
 
 // ---------- assembly ----------
@@ -1271,6 +1295,185 @@ export function makeCar(id, color) {
   car.rotation.order = 'YXZ';
   car.userData = { id, bodyMat: paint, tailMat: tail, wheels, len: d.len, width: d.width, wheelR: d.wheelR };
   return car;
+}
+
+// ---------- traffic ----------
+// Traffic uses the same models drawn with far fewer meshes (each mesh is a draw call):
+//  - one mesh per material; parts whose materials differ only in colour, roughness and
+//    metalness share one, with those values in vertex colours and a tiny float texture
+//    (so they come out exactly the same);
+//  - tyres, brake discs and the wheels' dark backing look the same however far they have
+//    turned, so they are static; only the rims (spokes, nuts) spin, both wheels of an axle
+//    as one mesh;
+//  - beyond LOD_FAR metres a simpler version takes over: a body with half the stations,
+//    coarser tyres, grille and plate in their average colour, rims that don't spin.
+// The player's car keeps full detail (makeCar).
+export const LOD_FAR = 60; // m: switch to the far version beyond this...
+export const LOD_NEAR = 50; // ...and back to full detail within this (no flicker in between)
+
+const PALETTE = ['dark', 'disc', 'caliper', 'tire', 'head', 'grille', 'plate', 'chrome', 'lens', 'badge'];
+const paletteSource = () => ({
+  dark: darkMat, disc: discMat, caliper: caliperMat, tire: tireMat, head: headMat, grille: grilleMat, plate: plateMat,
+  chrome: chromeMat, lens: lensMat, badge: badgeMat,
+});
+let palette = null;
+function paletteMaterials() {
+  if (palette) return palette;
+  const n = PALETTE.length;
+  const mr = new Float32Array(n * 4);
+  const em = new Float32Array(n * 4);
+  const src = paletteSource();
+  PALETTE.forEach((k, i) => {
+    const m = src[k];
+    mr.set([0, m.roughness, m.metalness, 1], i * 4);
+    em.set([m.emissive.r * m.emissiveIntensity, m.emissive.g * m.emissiveIntensity, m.emissive.b * m.emissiveIntensity, 1], i * 4);
+  });
+  const tex = (data) => {
+    const t = new THREE.DataTexture(data, n, 1, THREE.RGBAFormat, THREE.FloatType);
+    t.channel = 1;
+    t.needsUpdate = true;
+    return t;
+  };
+  const mrTex = tex(mr);
+  palette = {
+    // Dark trim, tyres, brake discs and calipers, head lights (far away: grille and plate too).
+    plain: new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 1, metalness: 1, roughnessMap: mrTex, metalnessMap: mrTex, emissive: 0xffffff, emissiveMap: tex(em),
+    }),
+    // Chrome, light lenses and badges, which reflect the same studio environment.
+    shiny: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 1, roughnessMap: mrTex, metalnessMap: mrTex, envMap, envMapIntensity: 1 }),
+  };
+  return palette;
+}
+
+// Average colour of a canvas texture, in linear light (what it looks like from far away).
+const averages = new Map();
+function averageColor(tex) {
+  if (averages.has(tex)) return averages.get(tex);
+  averages.set(tex, averageOf(tex));
+  return averages.get(tex);
+}
+function averageOf(tex) {
+  const { width, height } = tex.image;
+  const px = tex.image.getContext('2d').getImageData(0, 0, width, height).data;
+  const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const sum = [0, 0, 0];
+  for (let i = 0; i < px.length; i += 4) for (let k = 0; k < 3; k++) sum[k] += lin(px[i + k] / 255);
+  const n = px.length / 4;
+  return new THREE.Color(sum[0] / n, sum[1] / n, sum[2] / n);
+}
+
+// Only the listed attributes, not indexed (so geometries of any origin merge).
+function only(g, names) {
+  const p = g.index ? g.toNonIndexed() : g.clone();
+  for (const name of Object.keys(p.attributes)) if (!names.includes(name)) p.deleteAttribute(name);
+  if (!p.attributes.normal) p.computeVertexNormals();
+  return p;
+}
+// A part for a palette material: its colour per vertex and its palette slot in uv1.
+function paletteGeo(g, key, color) {
+  const p = only(g, ['position', 'normal']);
+  const n = p.attributes.position.count;
+  const col = new Float32Array(n * 3);
+  const uv = new Float32Array(n * 2);
+  const u = (PALETTE.indexOf(key) + 0.5) / PALETTE.length;
+  for (let i = 0; i < n; i++) {
+    col[i * 3] = color.r;
+    col[i * 3 + 1] = color.g;
+    col[i * 3 + 2] = color.b;
+    uv[i * 2] = u;
+    uv[i * 2 + 1] = 0.5;
+  }
+  p.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  p.setAttribute('uv1', new THREE.BufferAttribute(uv, 2));
+  return p;
+}
+
+const trafficCache = new Map();
+function trafficGeos(id) {
+  if (trafficCache.has(id)) return trafficCache.get(id);
+  const d = CAR_MODELS[id];
+  const geos = buildShape(id);
+  const { parts, wheel: W, fn } = geos;
+  const src = paletteSource();
+  const wheels = d.axles.flatMap((axle) => [-1, 1].map((s) => ({ axle, s, x: s * fn.wheelX(axle) })));
+  const at = (g, w) => g.clone().translate(w.x, d.wheelR, -w.axle);
+  const glassLoft = d.greenhouse === 'glass';
+  const paintOf = (body, glass) => mergeGeometries([...body, ...(glassLoft ? [] : glass), ...(parts.paint ? [parts.paint] : [])]
+    .map((g) => only(g, ['position', 'normal', 'color'])));
+  const merge = (list) => mergeGeometries(list.filter(Boolean));
+  const pal = (key, g, color = src[key].color) => (g ? paletteGeo(g, key, color) : null);
+  const wheelDark = wheels.map((w) => pal('dark', at(W[w.s].dark, w)));
+  const out = {
+    rimColor: W.color,
+    paint: paintOf(geos.body, geos.glass),
+    farPaint: paintOf(geos.farBody, geos.farGlass),
+    tail: parts.tail,
+    grille: parts.grille,
+    plate: parts.plate,
+    glass: merge([parts.glass, ...(glassLoft ? geos.glass : [])].map((g) => g && only(g, ['position', 'normal']))),
+    shiny: merge(['chrome', 'lens', 'badge'].map((k) => pal(k, parts[k]))),
+    plain: merge([
+      pal('dark', parts.dark), ...wheelDark, pal('disc', parts.disc), pal('caliper', parts.caliper), pal('head', parts.head),
+      ...wheels.map((w) => pal('tire', at(W.tire, w))),
+    ]),
+    farPlain: merge([
+      pal('dark', parts.dark), ...wheelDark, pal('head', parts.head),
+      pal('grille', parts.grille, averageColor(grilleTex)), pal('plate', parts.plate, averageColor(plateTex)),
+      ...wheels.map((w) => pal('tire', at(W.farTire, w))),
+    ]),
+    // Both rims of an axle, around the axle's centre (they spin together).
+    axles: d.axles.map((axle) => ({
+      axle,
+      geo: mergeGeometries([-1, 1].map((s) => W[s].face.clone().translate(s * fn.wheelX(axle), 0, 0))),
+    })),
+    farRims: mergeGeometries(wheels.map((w) => at(W[w.s].face, w))),
+  };
+  trafficCache.set(id, out);
+  return out;
+}
+
+export function makeTrafficCar(id, color) {
+  const d = CAR_MODELS[id];
+  const t = trafficGeos(id);
+  const pal = paletteMaterials();
+  const paint = new THREE.MeshPhysicalMaterial({
+    color: color ?? d.color, roughness: 0.35, metalness: 0.3, clearcoat: 1, clearcoatRoughness: 0.15, envMap, envMapIntensity: 0.7,
+    vertexColors: true,
+  });
+  const tail = new THREE.MeshStandardMaterial({ color: 0x6a0a0a, emissive: 0xff1a1a, emissiveIntensity: 0.6, roughness: 0.2 });
+  const rimMaterial = rimMatFor(t.rimColor);
+  const mesh = (g, m) => new THREE.Mesh(g, m);
+  const near = new THREE.Group();
+  near.add(mesh(t.paint, paint), mesh(t.tail, tail), mesh(t.plain, pal.plain), mesh(t.shiny, pal.shiny), mesh(t.glass, glassMat));
+  if (t.grille) near.add(mesh(t.grille, grilleMat));
+  if (t.plate) near.add(mesh(t.plate, plateMat));
+  const wheels = t.axles.map(({ axle, geo }) => {
+    const g = new THREE.Group();
+    g.position.set(0, d.wheelR, -axle);
+    g.add(mesh(geo, rimMaterial));
+    near.add(g);
+    return g;
+  });
+  const far = new THREE.Group();
+  far.add(mesh(t.farPaint, paint), mesh(t.tail, tail), mesh(t.farPlain, pal.plain), mesh(t.shiny, pal.shiny), mesh(t.glass, glassMat), mesh(t.farRims, rimMaterial));
+  far.visible = false;
+  const car = new THREE.Group();
+  car.add(near, far);
+  const shadow = buildShape(id).shadow.clone();
+  shadow.position.y = 0.03;
+  car.add(shadow);
+  car.rotation.order = 'YXZ';
+  car.userData = { id, bodyMat: paint, tailMat: tail, wheels, len: d.len, width: d.width, wheelR: d.wheelR, near, far };
+  return car;
+}
+
+// Shows the full or the simpler version of a traffic car for its distance from the camera.
+export function setTrafficDetail(car, distance) {
+  const { near, far } = car.userData;
+  const isFar = far.visible ? distance > LOD_NEAR : distance > LOD_FAR;
+  far.visible = isFar;
+  near.visible = !isFar;
 }
 
 // ---------- bikes ----------

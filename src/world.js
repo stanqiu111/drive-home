@@ -6,15 +6,70 @@ import { overheadClearance } from './clearance.js';
 import { buildLandmarks, landmarkFootprints } from './landmarks.js';
 
 const FOG_NEAR = 250;
-const FOG_FAR = 1800;
+export const FOG_FAR = 1800;
 
+// Map files, fetched once (the menu prefetches them in the background so switching maps
+// doesn't wait for the network). Only the text is kept; it is parsed when the map loads.
+const mapText = new Map();
+function fetchMapText(id) {
+  if (!mapText.has(id)) {
+    const p = fetch(`maps/${id}.json`).then((res) => {
+      if (!res.ok) throw new Error(`Could not load map "${id}" (${res.status})`);
+      return res.text();
+    });
+    p.catch(() => mapText.delete(id)); // try again next time
+    mapText.set(id, p);
+  }
+  return mapText.get(id);
+}
 export async function loadMapData(id) {
-  const res = await fetch(`maps/${id}.json`);
-  if (!res.ok) throw new Error(`Could not load map "${id}" (${res.status})`);
-  return res.json();
+  return JSON.parse(await fetchMapText(id));
+}
+export function prefetchMaps(ids) {
+  for (const id of ids) fetchMapText(id).catch(() => {});
 }
 
+// ---------- building in slices ----------
+// Building a map takes a second or more of work. It runs in slices of a few milliseconds, so
+// the menu keeps drawing and answering clicks meanwhile: long loops call `if (sl.due())
+// await sl.wait()`. `cancelled()` stops a build that is no longer wanted (another map was
+// picked); it then throws BuildCancelled.
+export class BuildCancelled extends Error {}
+// A plain task (not requestAnimationFrame) so the build can use the gaps between frames too.
+const channel = new MessageChannel();
+const waiting = [];
+channel.port1.onmessage = () => waiting.shift()?.();
+const yieldToBrowser = () => new Promise((resolve) => {
+  waiting.push(resolve);
+  channel.port2.postMessage(0);
+});
+export function slicer(budgetMs = 8, cancelled = () => false) {
+  let t0 = performance.now();
+  return {
+    due: () => performance.now() - t0 > budgetMs,
+    async wait() {
+      await yieldToBrowser();
+      if (cancelled()) throw new BuildCancelled('cancelled');
+      t0 = performance.now();
+    },
+    async tick() {
+      if (performance.now() - t0 > budgetMs) await this.wait();
+    },
+  };
+}
+const NO_SLICES = { due: () => false, wait: async () => {}, tick: async () => {} };
+
 // ---------- textures ----------
+// Texture noise (asphalt specks, lit windows) comes from a fixed seed, reset for every map,
+// so a map looks the same each time it loads.
+let seed = 1;
+function rand() {
+  seed = (seed + 0x6d2b79f5) | 0;
+  let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+}
+
 function canvasTexture(w, h, draw, { repeat = true } = {}) {
   const c = document.createElement('canvas');
   c.width = w;
@@ -31,19 +86,19 @@ function asphaltTexture() {
     g.fillStyle = '#45474b';
     g.fillRect(0, 0, w, h);
     for (let i = 0; i < 5000; i++) {
-      const v = (55 + Math.random() * 25) | 0;
+      const v = (55 + rand() * 25) | 0;
       g.fillStyle = `rgb(${v},${v},${v + 2})`;
-      g.fillRect(Math.random() * w, Math.random() * h, 1.5, 1.5);
+      g.fillRect(rand() * w, rand() * h, 1.5, 1.5);
     }
     g.strokeStyle = 'rgba(30,30,32,0.5)';
     for (let i = 0; i < 6; i++) {
       g.beginPath();
-      let x = Math.random() * w;
-      let y = Math.random() * h;
+      let x = rand() * w;
+      let y = rand() * h;
       g.moveTo(x, y);
       for (let k = 0; k < 6; k++) {
-        x += (Math.random() - 0.5) * 30;
-        y += Math.random() * 25;
+        x += (rand() - 0.5) * 30;
+        y += rand() * 25;
         g.lineTo(x, y);
       }
       g.stroke();
@@ -57,9 +112,9 @@ function concreteTexture() {
     g.fillStyle = '#b9b5ad';
     g.fillRect(0, 0, w, h);
     for (let i = 0; i < 500; i++) {
-      const v = (165 + Math.random() * 40) | 0;
+      const v = (165 + rand() * 40) | 0;
       g.fillStyle = `rgb(${v},${v - 3},${v - 8})`;
-      g.fillRect(Math.random() * w, Math.random() * h, 1.2, 1.2);
+      g.fillRect(rand() * w, rand() * h, 1.2, 1.2);
     }
     g.fillStyle = 'rgba(70,66,60,0.55)';
     g.fillRect(0, 0, w, 2);
@@ -72,9 +127,9 @@ function shingleTexture() {
     g.fillStyle = '#8a8a8a';
     g.fillRect(0, 0, w, h);
     for (let i = 0; i < 900; i++) {
-      const v = (110 + Math.random() * 60) | 0;
+      const v = (110 + rand() * 60) | 0;
       g.fillStyle = `rgb(${v},${v},${v})`;
-      g.fillRect(Math.random() * w, Math.random() * h, 1.5, 1.5);
+      g.fillRect(rand() * w, rand() * h, 1.5, 1.5);
     }
     for (let y = 0; y < 4; y++) {
       g.fillStyle = 'rgba(30,30,30,0.55)';
@@ -91,8 +146,8 @@ function towerTexture() {
     g.fillRect(0, 0, 64, 64);
     for (let y = 0; y < 4; y++) {
       for (let x = 0; x < 4; x++) {
-        const lit = Math.random() < 0.4;
-        g.fillStyle = lit ? (Math.random() < 0.5 ? '#ffd27a' : '#fff1c4') : '#20252e';
+        const lit = rand() < 0.4;
+        g.fillStyle = lit ? (rand() < 0.5 ? '#ffd27a' : '#fff1c4') : '#20252e';
         g.fillRect(x * 16 + 3, y * 16 + 3, 10, 11);
       }
     }
@@ -113,7 +168,7 @@ function houseTexture() {
       g.fillRect(0, y + 1, 64, 1);
     }
     for (let x = 0; x < 2; x++) {
-      const lit = Math.random() < 0.3;
+      const lit = rand() < 0.3;
       g.fillStyle = '#fbfaf6';
       g.fillRect(x * 32 + 7, 16, 18, 26);
       g.fillStyle = lit ? '#ffcf73' : '#2a313b';
@@ -133,11 +188,11 @@ function aptTexture() {
     g.fillStyle = '#d6cfc2';
     g.fillRect(0, 0, 64, 64);
     for (let i = 0; i < 300; i++) {
-      g.fillStyle = `rgba(0,0,0,${Math.random() * 0.08})`;
-      g.fillRect(Math.random() * 64, Math.random() * 64, 2, 2);
+      g.fillStyle = `rgba(0,0,0,${rand() * 0.08})`;
+      g.fillRect(rand() * 64, rand() * 64, 2, 2);
     }
     for (let x = 0; x < 2; x++) {
-      const lit = Math.random() < 0.3;
+      const lit = rand() < 0.3;
       g.fillStyle = '#f6f4ee';
       g.fillRect(x * 32 + 6, 12, 20, 30);
       g.fillStyle = lit ? '#ffcf73' : '#2b323c';
@@ -160,13 +215,13 @@ function brickTexture() {
     g.fillRect(0, 0, 64, 64);
     for (let y = 0; y < 64; y += 4) {
       for (let x = (y / 4) % 2 ? -4 : 0; x < 64; x += 8) {
-        const v = 140 + Math.random() * 40;
+        const v = 140 + rand() * 40;
         g.fillStyle = `rgb(${v | 0},${(v * 0.6) | 0},${(v * 0.5) | 0})`;
         g.fillRect(x + 1, y + 1, 6, 3);
       }
     }
     for (let x = 0; x < 2; x++) {
-      const lit = Math.random() < 0.2;
+      const lit = rand() < 0.2;
       g.fillStyle = '#e8e2d4';
       g.fillRect(x * 32 + 7, 14, 18, 28);
       g.fillStyle = lit ? '#ffcf73' : '#2a313b';
@@ -186,8 +241,8 @@ function bigboxTexture() {
     g.fillStyle = '#d9d3c6';
     g.fillRect(0, 0, 64, 64);
     for (let i = 0; i < 400; i++) {
-      g.fillStyle = `rgba(0,0,0,${Math.random() * 0.06})`;
-      g.fillRect(Math.random() * 64, Math.random() * 64, 2, 2);
+      g.fillStyle = `rgba(0,0,0,${rand() * 0.06})`;
+      g.fillRect(rand() * 64, rand() * 64, 2, 2);
     }
     g.fillStyle = 'rgba(60,55,50,0.5)';
     g.fillRect(0, 0, 1, 64);
@@ -371,7 +426,14 @@ function carveRoadCut(route, t, h) {
   }
 }
 
-function buildTerrain(t, h, waterLevel) {
+// Big meshes are cut into pieces about this size (m), so the ones out of view are skipped.
+const CHUNK = 500;
+const TILE = 16; // terrain cells per tile side (480 m)
+const chunkKey = (x, z) => cellKey(Math.floor(x / CHUNK), Math.floor(z / CHUNK));
+
+// The terrain as tiles. Normals are worked out once for the whole grid (exactly as
+// computeVertexNormals would for one mesh), so tile edges don't show.
+async function buildTerrain(t, h, waterLevel, sl = NO_SLICES) {
   const { x0, z0, cell, nx, nz } = t;
   const pos = new Float32Array(nx * nz * 3);
   const col = new Float32Array(nx * nz * 3);
@@ -397,36 +459,89 @@ function buildTerrain(t, h, waterLevel) {
       col[k * 3 + 1] = c.g;
       col[k * 3 + 2] = c.b;
     }
+    if ((j & 31) === 0 && sl.due()) await sl.wait();
   }
-  const idx = [];
-  const water = new MeshBuilder();
+  // Vertex normals: the sum of the (unnormalised) face normals around each vertex, added up
+  // in the same order and precision as BufferGeometry.computeVertexNormals.
+  const nor = new Float32Array(nx * nz * 3);
+  const hasCell = (a) => h[a] !== -32768 && h[a + 1] !== -32768 && h[a + nx] !== -32768 && h[a + nx + 1] !== -32768;
+  const face = (vA, vB, vC) => {
+    const bx = pos[vB * 3]; const by = pos[vB * 3 + 1]; const bz = pos[vB * 3 + 2];
+    const cbx = pos[vC * 3] - bx; const cby = pos[vC * 3 + 1] - by; const cbz = pos[vC * 3 + 2] - bz;
+    const abx = pos[vA * 3] - bx; const aby = pos[vA * 3 + 1] - by; const abz = pos[vA * 3 + 2] - bz;
+    const x = cby * abz - cbz * aby;
+    const y = cbz * abx - cbx * abz;
+    const z = cbx * aby - cby * abx;
+    for (const v of [vA, vB, vC]) {
+      nor[v * 3] += x;
+      nor[v * 3 + 1] += y;
+      nor[v * 3 + 2] += z;
+    }
+  };
   for (let j = 0; j < nz - 1; j++) {
     for (let i = 0; i < nx - 1; i++) {
       const a = j * nx + i;
-      const b = a + 1;
-      const cc = a + nx;
-      const d = cc + 1;
-      if (h[a] === -32768 || h[b] === -32768 || h[cc] === -32768 || h[d] === -32768) continue;
-      idx.push(a, cc, b, b, cc, d);
-      if (Math.min(h[a], h[b], h[cc], h[d]) / 10 < waterLevel) {
-        const X = x0 + i * cell;
-        const Z = z0 + j * cell;
-        const v = (dx, dz) => new THREE.Vector3(X + dx, waterLevel, Z + dz);
-        water.quad(v(0, 0), v(0, cell), v(cell, cell), v(cell, 0));
+      if (!hasCell(a)) continue;
+      face(a, a + nx, a + 1);
+      face(a + 1, a + nx, a + nx + 1);
+    }
+    if ((j & 31) === 0 && sl.due()) await sl.wait();
+  }
+  for (let k = 0; k < nx * nz; k++) {
+    const x = nor[k * 3]; const y = nor[k * 3 + 1]; const z = nor[k * 3 + 2];
+    const m = 1 / (Math.sqrt(x * x + y * y + z * z) || 1);
+    nor[k * 3] = x * m;
+    nor[k * 3 + 1] = y * m;
+    nor[k * 3 + 2] = z * m;
+  }
+
+  const terrainMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 });
+  const waterMat = new THREE.MeshStandardMaterial({ color: 0x3d6f8f, roughness: 0.15, metalness: 0.4 });
+  const out = [];
+  for (let tj = 0; tj < nz - 1; tj += TILE) {
+    for (let ti = 0; ti < nx - 1; ti += TILE) {
+      const i1 = Math.min(nx - 1, ti + TILE);
+      const j1 = Math.min(nz - 1, tj + TILE);
+      const w = i1 - ti + 1;
+      const idx = [];
+      const water = new MeshBuilder();
+      for (let j = tj; j < j1; j++) {
+        for (let i = ti; i < i1; i++) {
+          const a = j * nx + i;
+          if (!hasCell(a)) continue;
+          const la = (j - tj) * w + (i - ti);
+          idx.push(la, la + w, la + 1, la + 1, la + w, la + w + 1);
+          if (Math.min(h[a], h[a + 1], h[a + nx], h[a + nx + 1]) / 10 < waterLevel) {
+            const X = x0 + i * cell;
+            const Z = z0 + j * cell;
+            const v = (dx, dz) => new THREE.Vector3(X + dx, waterLevel, Z + dz);
+            water.quad(v(0, 0), v(0, cell), v(cell, cell), v(cell, 0));
+          }
+        }
       }
+      if (!idx.length) continue;
+      const n = w * (j1 - tj + 1);
+      const tp = new Float32Array(n * 3);
+      const tc = new Float32Array(n * 3);
+      const tn = new Float32Array(n * 3);
+      for (let j = tj; j <= j1; j++) {
+        const from = (j * nx + ti) * 3;
+        const to = (j - tj) * w * 3;
+        tp.set(pos.subarray(from, from + w * 3), to);
+        tc.set(col.subarray(from, from + w * 3), to);
+        tn.set(nor.subarray(from, from + w * 3), to);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(tp, 3));
+      g.setAttribute('color', new THREE.BufferAttribute(tc, 3));
+      g.setAttribute('normal', new THREE.BufferAttribute(tn, 3));
+      g.setIndex(idx);
+      out.push(new THREE.Mesh(g, terrainMat));
+      if (water.pos.length) out.push(new THREE.Mesh(water.build(), waterMat));
+      if (sl.due()) await sl.wait();
     }
   }
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  g.setIndex(idx);
-  g.computeVertexNormals();
-  const terrain = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1 }));
-  const waterMesh = new THREE.Mesh(
-    water.build(),
-    new THREE.MeshStandardMaterial({ color: 0x3d6f8f, roughness: 0.15, metalness: 0.4 }),
-  );
-  return [terrain, waterMesh];
+  return out;
 }
 
 // Nearest route sample to a point (grid-accelerated). Returns {i, d} or null beyond maxR.
@@ -524,11 +639,20 @@ function bridgeRuns(route) {
 const WALK_W = 2.0; // sidewalk width (m)
 const CURB_H = 0.15;
 
-function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads) {
-  const road = new MeshBuilder();
-  const skirt = new MeshBuilder();
-  const walk = new MeshBuilder();
-  const curb = new MeshBuilder();
+async function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads, sl = NO_SLICES) {
+  // One set of meshes per ~500 m of road, so stretches out of view are skipped.
+  const segSamples = Math.max(1, Math.round(CHUNK / route.step));
+  const segs = new Map();
+  const seg = (i) => {
+    const k = Math.floor(i / segSamples);
+    if (!segs.has(k)) {
+      segs.set(k, {
+        road: new MeshBuilder(), skirt: new MeshBuilder(), walk: new MeshBuilder(), curb: new MeshBuilder(),
+        deck: new MeshBuilder(), rail: new MeshBuilder(), pier: new MeshBuilder(),
+      });
+    }
+    return segs.get(k);
+  };
   const nearStreet = sideStreetIndex(roads);
   const selfNear = routeLookup(route);
   // Sidewalk on each side of each sample: city streets only, broken at intersections.
@@ -549,13 +673,14 @@ function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads)
           < Math.max(route.rightArr[other.i], -route.leftArr[other.i]) + 0.3 + WALK_W / 2;
       hasWalk[side][i] = nearStreet(tmpV.x, tmpV.z, 2.5) || outer * route.curv[i] > 0.7 || onOther ? 0 : 1;
     }
+    if ((i & 255) === 0 && sl.due()) await sl.wait();
   }
-  const deck = new MeshBuilder();
-  const rail = new MeshBuilder();
   const P = (s, lat, h) => route.toWorld(s, lat, h);
   const step = route.step;
 
   for (let i = 0; i < route.n - 1; i++) {
+    if ((i & 255) === 0 && sl.due()) await sl.wait();
+    const { road, skirt, walk, curb, deck, rail } = seg(i);
     const s0 = i * step;
     const s1 = s0 + step;
     const L0 = route.leftArr[i] - 0.5;
@@ -599,9 +724,9 @@ function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads)
   }
 
   const runs = bridgeRuns(route);
-  const pier = new MeshBuilder();
   for (const [a, b] of runs) {
     for (let s = a + 20; s < b - 10; s += 35) {
+      const { pier } = seg(Math.floor(s / step));
       const f = route.frame(s);
       const mid = (f.left + f.right) / 2;
       const top = P(s, mid, -1.6);
@@ -619,24 +744,25 @@ function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads)
   const group = new THREE.Group();
   const roadMat = new THREE.MeshStandardMaterial({ map: asphalt, roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const concrete = new THREE.MeshStandardMaterial({ color: 0xa9a59c, roughness: 0.9, side: THREE.DoubleSide });
-  group.add(
-    new THREE.Mesh(road.build(), roadMat),
-    new THREE.Mesh(skirt.build(), new THREE.MeshStandardMaterial({ color: 0x5f5a50, roughness: 1, side: THREE.DoubleSide })),
-    new THREE.Mesh(deck.build(), concrete),
-    new THREE.Mesh(rail.build(), new THREE.MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.6, side: THREE.DoubleSide })),
-    new THREE.Mesh(pier.build(), concrete),
-  );
+  const skirtMat = new THREE.MeshStandardMaterial({ color: 0x5f5a50, roughness: 1, side: THREE.DoubleSide });
+  const railMat = new THREE.MeshStandardMaterial({ color: 0xd8d8d8, roughness: 0.6, side: THREE.DoubleSide });
   const walkTex = concreteTexture();
   walkTex.anisotropy = asphalt.anisotropy;
-  group.add(
-    new THREE.Mesh(walk.build(), new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.95 })),
-    new THREE.Mesh(curb.build(), new THREE.MeshStandardMaterial({ color: 0xa8a49c, roughness: 0.9, side: THREE.DoubleSide })),
-  );
+  const walkMat = new THREE.MeshStandardMaterial({ map: walkTex, roughness: 0.95 });
+  const curbMat = new THREE.MeshStandardMaterial({ color: 0xa8a49c, roughness: 0.9, side: THREE.DoubleSide });
+  for (const b of segs.values()) {
+    for (const [mb, mat] of [[b.road, roadMat], [b.skirt, skirtMat], [b.deck, concrete], [b.rail, railMat], [b.pier, concrete], [b.walk, walkMat], [b.curb, curbMat]]) {
+      if (mb.pos.length) group.add(new THREE.Mesh(mb.build(), mat));
+    }
+    if (sl.due()) await sl.wait();
+  }
 
-  // White tied arches over the longest bridge (the Walterdale Bridge on the downtown route).
+  // White tied arches over the longest bridge (the Walterdale Bridge on the downtown route),
+  // with their hangers, as one mesh.
   if (withArches && runs.length) {
     const [a, b] = runs.reduce((m, r) => (r[1] - r[0] > m[1] - m[0] ? r : m));
     const white = new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.4 });
+    const parts = [];
     const len = b - a;
     const rise = Math.min(48, len * 0.22);
     for (const side of [-1, 1]) {
@@ -651,41 +777,49 @@ function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads)
         pts.push(P(s, latAt(s), 4 * u * (1 - u) * rise));
       }
       const curve = new THREE.CatmullRomCurve3(pts);
-      group.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 80, 0.9, 10, false), white));
+      parts.push(new THREE.TubeGeometry(curve, 80, 0.9, 10, false));
       for (let k = 2; k < 23; k++) {
         const top = curve.getPoint(k / 24);
         const s = a + (len * k) / 24;
         const bottom = P(s, latAt(s), 0);
         const hgt = top.y - bottom.y;
         if (hgt < 1) continue;
-        const hanger = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, hgt, 5), white);
-        hanger.position.set(bottom.x, bottom.y + hgt / 2, bottom.z);
-        group.add(hanger);
+        parts.push(new THREE.CylinderGeometry(0.08, 0.08, hgt, 5).translate(bottom.x, bottom.y + hgt / 2, bottom.z));
       }
     }
+    group.add(new THREE.Mesh(mergeGeometries(parts), white));
   }
   return group;
 }
 
 // Painted lines come only from markingPlan() in lane-layout.js (also used by
-// tools/check-roads.mjs); this just turns each line into thin quads on the road.
-function buildMarkings(route, routeData, signals) {
-  const meshes = { white: new MeshBuilder(), yellow: new MeshBuilder() };
+// tools/check-roads.mjs); this just turns each line into thin quads on the road, one mesh
+// per colour per ~500 m of road.
+async function buildMarkings(route, routeData, signals, sl = NO_SLICES) {
+  const segs = new Map();
   const H = 0.05;
-  for (const m of markingPlan(routeData, signals)) {
-    const mb = meshes[m.color];
+  const plan = markingPlan(routeData, signals);
+  await sl.tick();
+  for (const m of plan) {
+    if (sl.due()) await sl.wait();
     const hw = m.width / 2;
     for (let k = 1; k < m.pts.length; k++) {
       const [s0, a] = m.pts[k - 1];
       const [s1, b] = m.pts[k];
-      mb.quad(route.toWorld(s0, a - hw, H), route.toWorld(s0, a + hw, H), route.toWorld(s1, b + hw, H), route.toWorld(s1, b - hw, H));
+      const key = `${m.color}|${Math.floor(s0 / CHUNK)}`;
+      if (!segs.has(key)) segs.set(key, new MeshBuilder());
+      segs.get(key).quad(route.toWorld(s0, a - hw, H), route.toWorld(s0, a + hw, H), route.toWorld(s1, b + hw, H), route.toWorld(s1, b - hw, H));
     }
   }
   const mat = (color) => new THREE.MeshStandardMaterial({
     color, roughness: 0.6, emissive: color, emissiveIntensity: 0.15, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
   });
+  const mats = { white: mat(0xe8e8e8), yellow: mat(0xf2c230) };
   const group = new THREE.Group();
-  group.add(new THREE.Mesh(meshes.white.build(), mat(0xe8e8e8)), new THREE.Mesh(meshes.yellow.build(), mat(0xf2c230)));
+  for (const [key, mb] of segs) {
+    group.add(new THREE.Mesh(mb.build(), mats[key.split('|')[0]]));
+    if (sl.due()) await sl.wait();
+  }
   return group;
 }
 
@@ -744,12 +878,18 @@ function buildPiers(piers = []) {
   return new THREE.Mesh(mb.build(), new THREE.MeshStandardMaterial({ color: 0xa9a59c, side: THREE.DoubleSide }));
 }
 
-function buildSideRoads(roads, heightAt, asphalt, route) {
+async function buildSideRoads(roads, heightAt, asphalt, route, sl = NO_SLICES) {
   const blend = junctionBlend(route);
-  const mb = new MeshBuilder();
-  const deck = new MeshBuilder();
+  // Asphalt and deck/embankment meshes per ~500 m square, by where each piece lies.
+  const cells = new Map();
+  const cellAt = (ax, az, bx, bz) => {
+    const k = chunkKey((ax + bx) / 2, (az + bz) / 2);
+    if (!cells.has(k)) cells.set(k, { mb: new MeshBuilder(), deck: new MeshBuilder() });
+    return cells.get(k);
+  };
   const up = new THREE.Vector3(0, 1, 0);
   for (const r of roads) {
+    if (sl.due()) await sl.wait();
     const raw = [];
     for (let k = 0; k < r.p.length; k += 2) raw.push([r.p[k] / 10, r.p[k + 1] / 10]);
     // Subdivide so the ribbon follows the terrain.
@@ -796,6 +936,7 @@ function buildSideRoads(roads, heightAt, asphalt, route) {
         const l = Math.hypot(bx - ax, bz - az) || 1;
         const nx = (-(bz - az) / l) * hw;
         const nz = ((bx - ax) / l) * hw;
+        const { deck } = cellAt(ax, az, bx, bz);
         for (const sgn of [1, -1]) {
           const top1 = new THREE.Vector3(ax + sgn * nx, ys[k], az + sgn * nz);
           const top2 = new THREE.Vector3(bx + sgn * nx, ys[k + 1], bz + sgn * nz);
@@ -820,6 +961,7 @@ function buildSideRoads(roads, heightAt, asphalt, route) {
       const b = new THREE.Vector3(ax - nx, ys[k], az - nz);
       const c = new THREE.Vector3(bx - nx, ys[k + 1], bz - nz);
       const d = new THREE.Vector3(bx + nx, ys[k + 1], bz + nz);
+      const { mb, deck } = cellAt(ax, az, bx, bz);
       mb.quad(a, d, c, b, [0, acc[k] / 8, 0, acc[k + 1] / 8, 1, acc[k + 1] / 8, 1, acc[k] / 8], null, up);
       if (r.b || r.o) {
         const down = (p) => new THREE.Vector3(p.x, p.y - 1.4, p.z);
@@ -830,12 +972,15 @@ function buildSideRoads(roads, heightAt, asphalt, route) {
     }
   }
   const group = new THREE.Group();
-  group.add(
-    new THREE.Mesh(mb.build(), new THREE.MeshStandardMaterial({
-      map: asphalt, color: 0xcfcfcf, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
-    })),
-    new THREE.Mesh(deck.build(), new THREE.MeshStandardMaterial({ color: 0xa9a59c, side: THREE.DoubleSide })),
-  );
+  const roadMat = new THREE.MeshStandardMaterial({
+    map: asphalt, color: 0xcfcfcf, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+  });
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0xa9a59c, side: THREE.DoubleSide });
+  for (const { mb, deck } of cells.values()) {
+    if (mb.pos.length) group.add(new THREE.Mesh(mb.build(), roadMat));
+    if (deck.pos.length) group.add(new THREE.Mesh(deck.build(), deckMat));
+    if (sl.due()) await sl.wait();
+  }
   return group;
 }
 
@@ -965,7 +1110,7 @@ function faceQuad(mb, a, b, c, d, uvs, col, hint) {
 }
 const SOLID_UV = [0.97, 0.03, 0.97, 0.03, 0.97, 0.03, 0.97, 0.03];
 
-function buildBuildings(list, heightAt, occupancy) {
+async function buildBuildings(list, heightAt, occupancy, sl = NO_SLICES) {
   const chunks = new Map();
   const getChunk = (key) => {
     if (!chunks.has(key)) chunks.set(key, new MeshBuilder());
@@ -990,6 +1135,7 @@ function buildBuildings(list, heightAt, occupancy) {
     faceQuad(mb, a, b, c, d, [along(a), slope(a) * 1.3, along(b), slope(b) * 1.3, along(c), slope(c) * 1.3, along(d), slope(d) * 1.3], col, nn);
   };
   for (const b of list) {
+    if (sl.due()) await sl.wait();
     const h = b.h / 10;
     let ring = [];
     for (let k = 0; k < b.p.length; k += 2) ring.push([b.p[k] / 10, b.p[k + 1] / 10]);
@@ -1143,7 +1289,10 @@ function buildBuildings(list, heightAt, occupancy) {
     r: new THREE.MeshStandardMaterial({ map: shingleTexture(), vertexColors: true, roughness: 0.95 }),
   };
   const group = new THREE.Group();
-  for (const [key, mb] of chunks) group.add(new THREE.Mesh(mb.build(), mats[key.split(',')[2]] ?? mats.house));
+  for (const [key, mb] of chunks) {
+    group.add(new THREE.Mesh(mb.build(), mats[key.split(',')[2]] ?? mats.house));
+    if (sl.due()) await sl.wait();
+  }
   return group;
 }
 
@@ -1409,15 +1558,31 @@ function buildExitSigns(route, exits) {
   return group;
 }
 
-// Coarse grid of blocked ground (buildings, roads), used to place trees.
+// Coarse grid of blocked ground (buildings, roads), used to place trees. One bit per 4 m
+// cell over the terrain's box (plus a margin); cells line up with multiples of 4 m from the
+// map origin. Only needed while the map is built.
 class Occupancy {
-  constructor(cell = 4) {
+  constructor(t, cell = 4, margin = 200) {
     this.cell = cell;
-    this.set = new Set();
+    this.i0 = Math.floor((t.x0 - margin) / cell);
+    this.j0 = Math.floor((t.z0 - margin) / cell);
+    this.ni = Math.ceil(((t.nx - 1) * t.cell + 2 * margin) / cell) + 1;
+    this.nj = Math.ceil(((t.nz - 1) * t.cell + 2 * margin) / cell) + 1;
+    this.bits = new Uint32Array(Math.ceil((this.ni * this.nj) / 32));
   }
-  key(x, z) { return cellKey(Math.floor(x / this.cell), Math.floor(z / this.cell)); }
-  mark(x, z) { this.set.add(this.key(x, z)); }
-  has(x, z) { return this.set.has(this.key(x, z)); }
+  index(x, z) {
+    const i = Math.floor(x / this.cell) - this.i0;
+    const j = Math.floor(z / this.cell) - this.j0;
+    return i < 0 || j < 0 || i >= this.ni || j >= this.nj ? -1 : j * this.ni + i;
+  }
+  mark(x, z) {
+    const k = this.index(x, z);
+    if (k >= 0) this.bits[k >>> 5] |= 1 << (k & 31);
+  }
+  has(x, z, bits = this.bits) {
+    const k = this.index(x, z);
+    return k >= 0 && (bits[k >>> 5] & (1 << (k & 31))) !== 0;
+  }
   addPolygon(ring) {
     let minX = Infinity; let maxX = -Infinity; let minZ = Infinity; let maxZ = -Infinity;
     for (const [x, z] of ring) {
@@ -1490,35 +1655,48 @@ function buildTrees(route, heightAt, occupancy, waterLevel) {
   const c = new THREE.Color();
   const yAxis = new THREE.Vector3(0, 1, 0);
   const autumn = [0xe0a326, 0xd9772b, 0xc4432b, 0xb8b33a, 0x7f9a3a, 0xe8c43a];
-  const crowns = {};
-  for (const k of ['spruce', 'leafy', 'aspen']) {
-    const list = spots.filter((t) => kind(t[3]) === k);
-    crowns[k] = { list, mesh: new THREE.InstancedMesh(geos[k], new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }), Math.max(1, list.length)) };
+  const mats = {
+    spruce: new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }),
+    leafy: new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }),
+    aspen: new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true }),
+    trunk: new THREE.MeshStandardMaterial({ roughness: 0.95 }),
+  };
+  // Instanced per ~500 m square (one draw call per part per square), so only the trees
+  // near the camera are drawn.
+  const cells = new Map();
+  for (const t of spots) {
+    const k = chunkKey(t[0], t[2]);
+    if (!cells.has(k)) cells.set(k, []);
+    cells.get(k).push(t);
   }
-  const trunks = new THREE.InstancedMesh(geos.trunk, new THREE.MeshStandardMaterial({ roughness: 0.95 }), Math.max(1, spots.length));
-  spots.forEach(([x, y, z, r, r2], i) => {
-    const k = kind(r);
-    const s = k === 'spruce' ? 0.8 + r2 * 0.7 : 0.75 + r2 * 0.55;
-    q.setFromAxisAngle(yAxis, r2 * 6.28);
-    m.compose(v.set(x, y - 0.1, z), q, sc.set(s, s * (k === 'aspen' ? 1.1 : 1), s));
-    trunks.setMatrixAt(i, m);
-    trunks.setColorAt(i, c.setHex(k === 'aspen' ? 0xd9d6c8 : k === 'spruce' ? 0x4a3527 : 0x5a3d2b));
-  });
-  for (const [k, { list, mesh }] of Object.entries(crowns)) {
+  const group = new THREE.Group();
+  for (const list of cells.values()) {
+    const trunks = new THREE.InstancedMesh(geos.trunk, mats.trunk, list.length);
     list.forEach(([x, y, z, r, r2], i) => {
+      const k = kind(r);
       const s = k === 'spruce' ? 0.8 + r2 * 0.7 : 0.75 + r2 * 0.55;
       q.setFromAxisAngle(yAxis, r2 * 6.28);
-      mesh.setMatrixAt(i, m.compose(v.set(x, y - 0.1, z), q, sc.set(s, s * (k === 'aspen' ? 1.1 : 1), s)));
-      if (k === 'spruce') c.setHex(0x2f5a3a).offsetHSL(0, 0, (r2 - 0.5) * 0.08);
-      else if (k === 'aspen') c.setHex(r2 < 0.5 ? 0xf0c93a : 0xe3b52e);
-      else c.setHex(autumn[Math.floor(r2 * 1000) % autumn.length]);
-      mesh.setColorAt(i, c);
+      m.compose(v.set(x, y - 0.1, z), q, sc.set(s, s * (k === 'aspen' ? 1.1 : 1), s));
+      trunks.setMatrixAt(i, m);
+      trunks.setColorAt(i, c.setHex(k === 'aspen' ? 0xd9d6c8 : k === 'spruce' ? 0x4a3527 : 0x5a3d2b));
     });
-    mesh.count = list.length;
+    group.add(trunks);
+    for (const k of ['spruce', 'leafy', 'aspen']) {
+      const mine = list.filter((t) => kind(t[3]) === k);
+      if (!mine.length) continue;
+      const mesh = new THREE.InstancedMesh(geos[k], mats[k], mine.length);
+      mine.forEach(([x, y, z, , r2], i) => {
+        const s = k === 'spruce' ? 0.8 + r2 * 0.7 : 0.75 + r2 * 0.55;
+        q.setFromAxisAngle(yAxis, r2 * 6.28);
+        mesh.setMatrixAt(i, m.compose(v.set(x, y - 0.1, z), q, sc.set(s, s * (k === 'aspen' ? 1.1 : 1), s)));
+        if (k === 'spruce') c.setHex(0x2f5a3a).offsetHSL(0, 0, (r2 - 0.5) * 0.08);
+        else if (k === 'aspen') c.setHex(r2 < 0.5 ? 0xf0c93a : 0xe3b52e);
+        else c.setHex(autumn[Math.floor(r2 * 1000) % autumn.length]);
+        mesh.setColorAt(i, c);
+      });
+      group.add(mesh);
+    }
   }
-  trunks.count = spots.length;
-  const group = new THREE.Group();
-  group.add(trunks, ...Object.values(crowns).map((x) => x.mesh));
   return group;
 }
 
@@ -1545,21 +1723,28 @@ function buildStreetLights(route) {
   const geos = streetLightGeometries();
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x6e737a, roughness: 0.45, metalness: 0.6 });
   const lampMat = new THREE.MeshStandardMaterial({ color: 0xffe2a8, emissive: 0xffd27a, emissiveIntensity: 2.2, side: THREE.DoubleSide });
-  const count = Math.max(1, spots.length);
-  const meshes = [new THREE.InstancedMesh(geos.pole, poleMat, count), new THREE.InstancedMesh(geos.lens, lampMat, count)];
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();
   const one = new THREE.Vector3(1, 1, 1);
   const yAxis = new THREE.Vector3(0, 1, 0);
-  spots.forEach((s, i) => {
+  // Instanced per ~500 m square, like the trees.
+  const cells = new Map();
+  for (const s of spots) {
     // With the route's yaw applied, local -x points across the road to the left.
     q.setFromAxisAngle(yAxis, route.yaw(s));
-    m.compose(route.toWorld(s, route.rightEdge(s) + 1.4, 0), q, one);
-    for (const mesh of meshes) mesh.setMatrixAt(i, m);
-  });
-  for (const mesh of meshes) mesh.count = spots.length;
+    const p = route.toWorld(s, route.rightEdge(s) + 1.4, 0);
+    const k = chunkKey(p.x, p.z);
+    if (!cells.has(k)) cells.set(k, []);
+    cells.get(k).push(m.compose(p, q, one).clone());
+  }
   const group = new THREE.Group();
-  group.add(...meshes);
+  for (const list of cells.values()) {
+    for (const [geo, mat] of [[geos.pole, poleMat], [geos.lens, lampMat]]) {
+      const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+      list.forEach((mm, i) => mesh.setMatrixAt(i, mm));
+      group.add(mesh);
+    }
+  }
   return group;
 }
 
@@ -1587,68 +1772,113 @@ function buildFinish(route, label) {
 }
 
 // ---------- main entry ----------
-export function createWorld(scene, data, { maxAnisotropy = 1 } = {}) {
-  const route = new Route({ step: data.step, ...data.route });
-  const heights = decodeHeights(data.terrain);
-  carveRoadCut(route, data.terrain, heights);
-  const heightAt = makeHeightAt(data.terrain, heights);
-
-  const group = new THREE.Group();
-  scene.add(group);
+// Sky, fog and sunlight are the same on every map, so they are set up once for the scene:
+// shaders are compiled for exactly these lights and fog, before a map is first shown.
+export function setupSky(scene) {
   scene.background = skyTexture();
   scene.fog = new THREE.Fog(0xe0866a, FOG_NEAR, FOG_FAR);
   const sun = new THREE.DirectionalLight(0xffc28f, 2.0);
   sun.position.set(-300, 250, -600);
-  group.add(new THREE.HemisphereLight(0xffe2c4, 0x3a3a4a, 1.6), sun);
+  scene.add(new THREE.HemisphereLight(0xffe2c4, 0x3a3a4a, 1.6), sun);
+}
+
+// Every geometry, material and texture under an object.
+export function resourcesOf(root) {
+  const out = new Set();
+  root.traverse((o) => {
+    if (o.geometry) out.add(o.geometry);
+    for (const mat of Array.isArray(o.material) ? o.material : o.material ? [o.material] : []) {
+      out.add(mat);
+      for (const v of Object.values(mat)) if (v?.isTexture) out.add(v);
+    }
+  });
+  return out;
+}
+
+// Frees what `root` uses on the GPU, except anything in `keep` (shared with what stays).
+export function disposeObject(root, keep = new Set()) {
+  for (const r of resourcesOf(root)) {
+    // Environment maps are shared with the cars; worlds never own them.
+    if (!keep.has(r) && !r.isCubeTexture && r.mapping !== THREE.CubeUVReflectionMapping) r.dispose();
+  }
+  // Instanced meshes hold their own per-instance buffers on the GPU.
+  root.traverse((o) => { if (o.isInstancedMesh) o.dispose(); });
+}
+
+// Builds a map's world in slices (see slicer). The group is not added to any scene: the
+// caller shows it with scene.add(world.group) when it is ready, and frees it with dispose().
+export async function buildWorld(data, { maxAnisotropy = 1, sl = NO_SLICES } = {}) {
+  seed = 20261005;
+  const route = new Route({ step: data.step, ...data.route });
+  const heights = decodeHeights(data.terrain);
+  carveRoadCut(route, data.terrain, heights);
+  const heightAt = makeHeightAt(data.terrain, heights);
+  const group = new THREE.Group();
+  group.name = `world:${data.id}`;
+  await sl.tick();
 
   const asphalt = asphaltTexture();
   asphalt.anisotropy = maxAnisotropy;
-  const occupancy = new Occupancy();
+  // Blocked ground (roads, then buildings and landmark sites), for placing trees. Only needed
+  // while building: it is dropped at the end so the finished world doesn't keep it.
+  let occupancy = new Occupancy(data.terrain);
   for (let s = 0; s < route.length; s += 4) {
     const f = route.frame(s);
     const a = route.toWorld(s, f.left - 2, 0);
     const b = route.toWorld(s, f.right + 2, 0);
     occupancy.addLine(a.x, a.z, b.x, b.z, 2);
+    if (sl.due()) await sl.wait();
   }
   for (const r of data.roads) {
     for (let k = 2; k < r.p.length; k += 2) occupancy.addLine(r.p[k - 2] / 10, r.p[k - 1] / 10, r.p[k] / 10, r.p[k + 1] / 10, r.w / 2 + 1);
+    if (sl.due()) await sl.wait();
   }
   // Road cells only (route + side roads, with a margin), so landmark props can keep off them.
-  const roadCells = new Set(occupancy.set);
-  const onRoad = (x, z) => roadCells.has(occupancy.key(x, z));
+  let roadCells = occupancy.bits.slice();
+  const onRoad = (x, z) => roadCells !== null && occupancy.has(x, z, roadCells);
   // No trees inside landmark sites (refineries, the Legislature grounds…).
   for (const f of landmarkFootprints(data)) occupancy.addBox(f.x - f.hw, f.z - f.hd, f.x + f.hw, f.z + f.hd);
+  await sl.tick();
 
-  const landmarks = buildLandmarks(data, heightAt, onRoad, routeAtFor(route));
-  group.add(
-    ...buildTerrain(data.terrain, heights, data.water),
-    buildRouteRoad(route, heightAt, data.water, data.id === 'home', asphalt, data.roads),
-    buildMarkings(route, route.laneData, activeSignals(data.signals, route.length)),
-    buildSideRoads(data.roads, heightAt, asphalt, route),
-    buildPiers(data.piers),
-    buildBuildings(data.buildings, heightAt, occupancy),
-    buildSigns(data.buildings, route, heightAt),
-    buildExitSigns(route, data.exits),
-    landmarks,
-    buildTrees(route, heightAt, occupancy, data.water),
-    buildStreetLights(route),
-    buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : data.name.toUpperCase()),
-  );
-
-  function dispose() {
-    scene.remove(group);
-    group.traverse((o) => {
-      o.geometry?.dispose();
-      const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
-      for (const mat of mats) {
-        mat.map?.dispose();
-        mat.dispose();
-      }
-    });
-  }
-
+  const add = (name, ...parts) => {
+    const g = new THREE.Group();
+    g.name = name;
+    g.add(...parts);
+    group.add(g);
+  };
+  add('terrain', ...(await buildTerrain(data.terrain, heights, data.water, sl)));
+  await sl.tick();
+  add('road', await buildRouteRoad(route, heightAt, data.water, data.id === 'home', asphalt, data.roads, sl));
+  await sl.tick();
+  add('markings', await buildMarkings(route, route.laneData, activeSignals(data.signals, route.length), sl));
+  await sl.tick();
+  add('sideRoads', await buildSideRoads(data.roads, heightAt, asphalt, route, sl), buildPiers(data.piers));
+  await sl.tick();
+  add('buildings', await buildBuildings(data.buildings, heightAt, occupancy, sl));
+  await sl.tick();
+  add('signs', buildSigns(data.buildings, route, heightAt));
+  await sl.tick();
+  add('exitSigns', buildExitSigns(route, data.exits));
+  await sl.tick();
+  const landmarks = await buildLandmarks(data, heightAt, onRoad, routeAtFor(route), sl);
+  add('landmarks', landmarks);
+  await sl.tick();
+  add('trees', buildTrees(route, heightAt, occupancy, data.water));
+  add('streetLights', buildStreetLights(route));
+  group.add(buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : data.name.toUpperCase()));
+  occupancy = null;
+  roadCells = null;
+  await sl.tick();
   // Room above the road (bridge decks, overpasses) so flying and the camera stay under it.
-  const clearance = overheadClearance(route, data, landmarks);
+  const clearance = await overheadClearance(route, data, landmarks, sl);
+  await sl.tick();
 
-  return { route, heightAt, group, dispose, data, clearance };
+  return {
+    route, heightAt, group, data, clearance,
+    // Frees the GPU side of everything not also used by `keep` (the world replacing it).
+    dispose(keep) {
+      group.parent?.remove(group);
+      disposeObject(group, keep ? resourcesOf(keep) : undefined);
+    },
+  };
 }

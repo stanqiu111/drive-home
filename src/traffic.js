@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeCar, spinWheels, TRAFFIC_MIX, TRAFFIC_COLORS } from './cars.js';
+import { makeTrafficCar, setTrafficDetail, spinWheels, TRAFFIC_MIX, TRAFFIC_COLORS } from './cars.js';
 
 const COUNT = 14;
 const SAFE_GAP = 6;
@@ -21,7 +21,7 @@ export class Traffic {
     this.effects = effects;
     this.cars = [];
     for (let i = 0; i < COUNT; i++) {
-      const mesh = makeCar(TRAFFIC_MIX[i % TRAFFIC_MIX.length], pick(TRAFFIC_COLORS));
+      const mesh = makeTrafficCar(TRAFFIC_MIX[i % TRAFFIC_MIX.length], pick(TRAFFIC_COLORS));
       mesh.visible = false;
       scene.add(mesh);
       this.cars.push({ mesh, len: mesh.userData.len, s: 0, lat: 0, y: 0, speed: 0, cruise: 0, lane: 0, targetLane: 0, flying: null, active: false });
@@ -104,7 +104,8 @@ export class Traffic {
     }
   }
 
-  update(dt, t, player) {
+  // `eye` (the camera position) picks full or simpler detail for each car.
+  update(dt, t, player, eye = null) {
     const r = this.route;
     for (const c of this.cars) {
       if (!c.active) {
@@ -120,21 +121,22 @@ export class Traffic {
       const jam = 0.5 + 0.5 * Math.sin(c.s * 0.0035 + t * 0.1);
       let target = Math.min(c.cruise * (0.5 + 0.5 * jam), r.cornerAhead(c.s, 40).v);
 
+      // The closest thing ahead in this lane: another car, the player or a red light.
       let gap = Infinity;
       let aheadSpeed = 0;
-      const consider = (g, speed) => {
-        if (g < gap) { gap = g; aheadSpeed = speed; }
-      };
       for (const o of this.cars) {
-        if (o === c || !o.active || o.flying || o.s <= c.s) continue;
-        if (Math.abs(o.lat - c.lat) < 2.2) consider(o.s - c.s - (o.len + c.len) / 2, o.speed);
+        if (o === c || !o.active || o.flying || o.s <= c.s || Math.abs(o.lat - c.lat) >= 2.2) continue;
+        const g = o.s - c.s - (o.len + c.len) / 2;
+        if (g < gap) { gap = g; aheadSpeed = o.speed; }
       }
       if (player.y < 1.5 && player.s > c.s && Math.abs(player.x - c.lat) < 2.2) {
-        consider(player.s - c.s - (player.len + c.len) / 2, player.speed);
+        const g = player.s - c.s - (player.len + c.len) / 2;
+        if (g < gap) { gap = g; aheadSpeed = player.speed; }
       }
       const sig = this.signals?.nextAhead(c.s, 90);
       if (sig && (sig.state === 'red' || (sig.state === 'yellow' && sig.stopS - c.s > 15))) {
-        consider(sig.stopS - c.s - c.len / 2, 0);
+        const g = sig.stopS - c.s - c.len / 2;
+        if (g < gap) { gap = g; aheadSpeed = 0; }
       }
 
       if (gap < SAFE_GAP * 2) target = Math.min(target, aheadSpeed + (gap - SAFE_GAP) * 0.8);
@@ -170,5 +172,6 @@ export class Traffic {
       c.mesh.rotation.set(r.pitch(c.s), r.yaw(c.s) - (changing ? Math.sign(dx) * 0.08 : 0), 0);
       spinWheels(c.mesh, ds);
     }
+    if (eye) for (const c of this.cars) if (c.active) setTrafficDetail(c.mesh, c.mesh.position.distanceTo(eye));
   }
 }

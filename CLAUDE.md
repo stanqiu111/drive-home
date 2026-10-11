@@ -35,12 +35,14 @@ npm run preview    # serve the production build
 - `main.js`: game loop, menu, HUD, race flow, driving physics, collisions, cameras, leaderboard and achievements UI.
   - `MAPS` = `public/maps/index.json` (written by the builder: km, route polyline, street list, lights, curves, bridge/highway metres, climb, landmarks) merged with `MAP_INFO` (destination label, 2-sentence description, cheer, ending theme). Add new maps to `MAP_INFO` and to `NEW_MAPS` for the "New" badge.
   - The map-select screen groups routes by start point (`GROUPS`), draws north-up route maps as inline SVG, difficulty stars and badges from the index facts, and a detail panel with description, rush-hour race bar and online rank.
-  - HUD landmark callouts come from `data.landmarks` in each map file.
-  - A dev-only hook, `window.__game`, exposes `S`, `route`, `world`, `startRace`, `finish`, `selectMap`, `selectCar`, `activatePower`, `progress`, `traffic`, `nitroCans`, `mysteryBoxes`, `sound`, `orbit` and `cam` (`{pos, look, fov}` free camera, `null` to release) for automated checks. `sound.debug` gives the sound event counters, engine state (gear, rpm, pitch, `source`: recorded or synth), the recordings' load state (`samples`) and mute state.
+  - HUD landmark callouts come from `data.landmarks` in each map file. The HUD only writes to the page when a value changed.
+  - Loading a map (`selectMap`) never freezes the menu: the new world is built in ~8 ms slices while the old one stays on screen, its shaders are compiled in the background (`warmUp`: `compileAsync` on one stand-in per distinct shader, textures uploaded, bounding spheres computed), then it replaces the old world, whose GPU memory is freed. Picking another map meanwhile cancels the build. Map files are prefetched after the first map is shown.
+  - Resolution (`PIXEL_BUDGET`, `applyResolution`, `adaptResolution`): the 3D view uses at most ~3M pixels, never more than the screen's pixel ratio, recomputed on resize and when the window moves to another screen; while racing, slow GPU-bound frames lower it in 15% steps and it climbs back when frames are steady. The menu draws every other frame.
+  - A dev-only hook, `window.__game`, exposes `S`, `route`, `world`, `signals`, `renderer`, `effects`, `res` (resolution state), `startRace`, `finish`, `selectMap`, `selectCar`, `activatePower`, `progress`, `traffic`, `nitroCans`, `mysteryBoxes`, `sound`, `orbit` and `cam` (`{pos, look, fov}` free camera, `null` to release) for automated checks. `sound.debug` gives the sound event counters, engine state (gear, rpm, pitch, `source`: recorded or synth), the recordings' load state (`samples`) and mute state.
 - `route.js`: works in route space.
   - `s` = metres along the route; `lat` = sideways offset (+ = right). Convert with `toWorld(s, lat, h)`.
   - Models face -z, and `yaw = atan2(-tx, -tz)`.
-- `world.js`: builds a map from its JSON:
+- `world.js`: builds a map from its JSON (`buildWorld`, async, in slices; it returns the world without adding it to the scene). Sky, fog and sunlight are scene-wide (`setupSky`), shaders depend on them. Everything big is cut into ~500 m pieces (`CHUNK`; terrain in 16-cell tiles) so pieces out of view aren't drawn; keep it that way when adding things. Texture noise uses a fixed seed (a map looks the same every load):
   - terrain (carved under the road) and water
   - the road, curbs and sidewalks (broken at side streets), bridges (Walterdale arches on `home`) and lane markings
   - side streets that ramp into junctions; raised side roads (overpass decks, their ramps, the other half of a divided road beside a hump) and piers are drawn from heights the builder writes (see "Road structures")
@@ -48,17 +50,19 @@ npm run preview    # serve the production build
   - store signs (`buildSigns`): real business names on the road-facing wall plus roadside pylon signs for big lots, packed into one texture atlas
   - exit guide signs (`buildExitSigns`) from OSM ramp `destination` tags
   - trees, street lights and the finish banner
-- `landmarks.js` + `landmark-list.js` + `landmarks/<id>.js`: hand-made landmark models placed by latitude/longitude on whichever map covers them (Legislature, downtown skyline, Muttart, Hotel Macdonald, High Level Bridge, Rossdale plant, refineries, water tower, Lafarge, container yard, Snow Valley). `landmark-studio.html?id=<id>` renders one model from four angles for checking; `landmarks/_example.js` documents the module contract (`ctx.ground` follows real terrain, `ctx.onRoad` keeps props off streets, `ctx.route` describes the driven road so models keep clear of it). In dev, a warning lists any landmark standing on the driven road; it must stay silent. `excludeBox: [halfW, halfD, offsetE, offsetS]` in the list clears generic buildings and trees under a site.
+- `landmarks.js` + `landmark-list.js` + `landmarks/<id>.js`: hand-made landmark models placed by latitude/longitude on whichever map covers them (Legislature, downtown skyline, Muttart, Hotel Macdonald, High Level Bridge, Rossdale plant, refineries, water tower, Lafarge, container yard, Snow Valley). `landmark-studio.html?id=<id>` renders one model from four angles for checking; `landmarks/_example.js` documents the module contract (`ctx.ground` follows real terrain, `ctx.onRoad` keeps props off streets, `ctx.route` describes the driven road so models keep clear of it). The road check (is any landmark standing on the driven road?) is slow, so it only runs on request: open the game with `?checkLandmarks`, or run `node tools/dev/check-landmarks.mjs [port]` with the dev server up; it must report 0 on every map. `excludeBox: [halfW, halfD, offsetE, offsetS]` in the list clears generic buildings and trees under a site.
 - `cars.js`: six team cars, each body lofted from its real dimensions.
   - The cars: Tesla Model X, Honda CR-V, Honda Accord, Lexus IS 300, Subaru Legacy, Kia Carnival.
   - Shape comes from the `side`, `plan` and `cabin` keyframes plus a per-car `section` style.
   - `details()` draws lights and grilles that are projected onto the body.
+  - Traffic uses `makeTrafficCar`: the same model in 10 meshes instead of 28 (parts that differ only in colour, roughness and metalness share a material through tiny palette textures; tyres and discs are static; the two rims of an axle spin as one), pixel-identical up close, and beyond 60 m (`LOD_FAR`, back within 50 m) a simpler version (coarser body and tyres, flat grille/plate colours). The player's car keeps full detail (`makeCar`). After changing a car, compare traffic renders at 10 m and 60 m too.
   - The file also holds the Bicycle, Cam's E-bike and the shared rider.
 - `funrides.js`: hand-designed rides built from simple parts: Poutine, Oilers Jersey, Rogers Place and the Rocket.
   - The Rocket is locked until every achievement is done.
   - It has endless nitro, lifts off above 250 km/h and smashes through traffic.
 - `traffic.js`: AI cars.
-- `signals.js`: real signal positions, light cycle, stop lines and crosswalks.
+- `signals.js`: real signal positions, light cycle, stop lines and crosswalks. All signals of a 1 km stretch share one mesh per material; the lamps glow through a small state texture.
+- `effects.js`: explosion debris and tyre smoke (two instanced meshes), shockwave rings and the flash light (always in the scene at zero brightness: adding or removing a light recompiles every shader).
 - `pickups.js`: nitro cans.
 - `powers.js`: the ? boxes (shield, turbo, fly, blast). Turbo comes up twice as often.
 - `ending.js`: per-map finish cutscene. Only `home` ends with video games; the others are burger, noodles, beach, shopping and BBQ.
@@ -83,6 +87,7 @@ npm run preview    # serve the production build
 - It needs `tools/cache/alberta-latest.osm.pbf` (about 350 MB), from https://download.geofabrik.de/north-america/canada/alberta-latest.osm.pbf. `tools/cache/` is gitignored; the other downloads cache there automatically.
 - `tools/cache/` is not in git; on a new computer it starts empty. The builder re-downloads routes, buildings, zoning and terrain by itself. The 350 MB `.pbf` is only read once to make `osm-corridor.json`, so it's needed only when that file is missing or must be re-extracted, for example after adding tags to `WAY_KEYS` such as `railway` for the hump fix. Download it by hand from the link above. A fresh download has newer OpenStreetMap data, so rebuilt maps may differ slightly.
 - Maps can have their own `start` (lon/lat) and `from` label; the two downtown maps start on 107 St by the Legislature (a public street). Raised structures are decided here (see "Road structures"). Railways come from a separate one-time pass over the `.pbf` (`tools/cache/osm-rail.json`).
+- Side roads are kept only on the map's own ground (`clipRoadsToGround`: within `TERRAIN_RADIUS` + 100 m of the route). The OSM extract holds the streets along every route, and the game can't draw roads off its terrain anyway; without this each map file carried ~1,000 km of roads it had to index on every load.
 - Building classes come from OSM tags, then City of Edmonton zoning polygons (`fixa-tstc`, cached per map), then OSM land use, then size. Footprints under a landmark's `excludeR` are dropped. Named buildings keep their OSM name (`n`) for signs.
 - **Adding a map:** add it to `MAPS` in `tools/build-maps.mjs` and to `MAP_INFO` in `src/main.js`, rebuild, then add its id to BOTH `map in (...)` checks in `supabase/schema.sql` and re-run the SQL; otherwise posting times on that map fails.
 - **Adding a landmark:** add an entry to `src/landmark-list.js`, write `src/landmarks/<id>.js`, check it with `landmark-studio.html`, then rebuild the maps so footprints under it are dropped and the route callout is written.
@@ -132,7 +137,7 @@ The DEM is bare earth, so bridges and overpasses have to be made up. On 2026-10-
   - **Route humps:** only where a road or railway really crosses under the route bridge. Lift only as much as `HUMP_CLEAR` needs. Ramps keep a 6% grade and a crest radius of at least `HUMP_RADIUS`. Neighbouring humps merge instead of adding. The lift goes into `route.lift`.
   - **`sideRoadStructures()`:** a side bridge that crosses OVER the route gets a deck `OVERPASS_CLEAR` above it (`o: 1`). The road pieces joined to its ends ramp down (`e: 1`) and are never raised inside the route corridor. Piers (`piers`) never stand on the route or any road. The other half of a divided road beside a hump rides level with us (`e: 1`). Side roads that meet a raised hump ramp stop at the embankment foot.
   - Raised pieces carry `h`, a height per point, and `world.js` just draws it; `junctionBlend` never drags a side road up a hump ramp.
-- **Landmarks** use `ctx.route` to keep clear of the driven road (the High Level Bridge is fitted to it and drops steel that would stand in the lanes). The dev warning must stay silent on every map.
+- **Landmarks** use `ctx.route` to keep clear of the driven road (the High Level Bridge is fitted to it and drops steel that would stand in the lanes). The landmark road check (`node tools/dev/check-landmarks.mjs`, or `?checkLandmarks`) must report 0 on every map.
 - **Room overhead.** `src/clearance.js` measures the room above the road at every route sample: overpass decks from the map data, and landmark parts over the road found by casting rays up (the High Level Bridge's upper deck). Flying (the Fly power, the Rocket's lift-off) and the chase camera stay under it, looking ahead so they dip in time. Anything new built over the road must be in the map data or a landmark, so this sees it.
 - **Bridges only where OSM has one.** Route samples with no OSM road (gaps, and the parking-lot stretch at a route's end) are a bridge only when the roads on both sides of the gap are bridges. The game doesn't cut the ground away under bridges, so a made-up bridge disappears under the ground. That happened at the end of Snow Valley on 2026-10-10. `check-roads` fails on made-up bridges and on bridge decks below the ground.
 - **The check.** `tools/check-roads.mjs` (run by `npm run build`) also fails on:
@@ -155,7 +160,21 @@ The DEM is bare earth, so bridges and overpasses have to be made up. On 2026-10-
 - There are no unit tests. Check changes by running the dev server and driving the game with headless Chrome (puppeteer-core, a dev dependency) and screenshots. Use `window.__game` to jump along the route (`S.s`), start races and finish.
 - `node tools/dev/shots.mjs <map> <s,s,...>` saves a driver's view and a high view at each route position and prints fps. Write other throwaway test scripts outside the repo.
 - Test UI through real clicks. A past bug deleted the Start button handlers, and tests that started races via the hook didn't notice.
-- After world or car changes, check fps (target 60) and menu load time on the biggest maps (`home`, `sherwood`).
+- After world or car changes, check fps and map switching on the biggest maps (`home`, `sherwood`); see "Performance".
+
+### Performance
+
+The owner plays on an M2 MacBook Air (fanless; Retina screen at 2x plus an external 2560×1440 monitor at 1x) in Chrome, usually on the dev server.
+
+- **Measure** with `node tools/dev/perf.mjs` (dev server running; the top of the file explains every number). It runs headless Chrome on the real GPU (`--use-angle=metal`) and emulates the Retina laptop (1440×900 at 2x).
+  - `switch`: clicks through the maps in the menu; time to load and the longest freeze. Also works on a production preview (`npm run build && npx vite preview --port 4174`, then `--port 4174`).
+  - `drive --maps home,sherwood,refinery,snowvalley`: a 40 s scripted drive (gas, nitro, crashes, all power-ups, four spots along the route): frame-time p50/p95/p99, frames over 20/33 ms, CPU and GPU ms per frame, draw calls, triangles.
+  - `firsts`: the first nitro, crash, smoke, power-ups and finish; shaders built during play must be 0.
+  - `--throttle 4` slows the CPU 4x (a busy machine); `--monitor 2560x1440` moves the window to a 1x monitor after loading; `--uncapped` removes the 60 Hz cap to show headroom.
+  - Run one test at a time and repeat anything important: other programs change the numbers. A clipped puppeteer screenshot (`clip:`) resizes the page, which re-applies the resolution budget; take full screenshots when comparing pixels.
+- **Targets**: steady 60 fps at deviceScaleFactor 2 on 1440×900 (p95 frame time under 20 ms, no frames over 33 ms in the drive test); switching maps never freezes the menu for more than ~100 ms at a time; no shaders built during play.
+- **Keep the look**: before/after screenshots of the same spots must match. Pixel-diff full screenshots taken at the same resolution (set `__game.renderer.setPixelRatio(devicePixelRatio)` first in the new code).
+- Things that would break this: one mesh for a whole map (cut big things into ~500 m pieces), building or compiling during a race, `backdrop-filter` on HUD panels, writing the HUD every frame, adding or removing lights at run time.
 
 ## Status and handoff (2026-10-08)
 
@@ -163,8 +182,12 @@ The owner switched computers mid-task. This section is the compressed history an
 
 ### Where things are
 
-- **Live** (`main`, deployed 2026-10-09 with the owner's OK): 8 maps, landmarks, the map-select screen, building styles, store and exit signs, the online leaderboard and achievements. Also live: the road-line rewrite, the road-structure fix, signals at real junctions and the sound effects.
-- **In progress:** a performance pass for the owner's report of fps dropping to ~30 on their Retina MacBook. It covers adaptive resolution, camera far matched to the fog, precompiled shaders, no runtime building, and lighter distant traffic. Work in progress goes on a branch, and it goes live only after the owner checks it locally and says so.
+- **Live** (`main`, deployed 2026-10-09 with the owner's OK): 8 maps, landmarks, the map-select screen, building styles, store and exit signs, the online leaderboard and achievements, the road-line rewrite, the road-structure fix, signals at real junctions and the synthesized sound effects.
+- **Branch `wip/fixes-oct10`** (not live; the owner checks it locally, then says whether to deploy). It fixes the owner's 2026-10-10 list:
+  1. map switching no longer freezes the menu, plus the wider performance pass (see "Performance");
+  2. engines, turbo, blow-off and tyre squeal come from real CC0 recordings (see "Sounds");
+  3. flying stays under the High Level Bridge's upper deck and under overpasses (`clearance.js`);
+  4. the road at the end of Snow Valley is visible again (no made-up bridge).
 
 ### Owner to-dos
 

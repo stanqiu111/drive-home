@@ -80,13 +80,22 @@ export function landmarkFootprints(data) {
   return out;
 }
 
+// The road check (is any landmark standing on the driven road?) visits every triangle of
+// every model, which freezes the game for a second or more on the big sites, so it only runs
+// on request: open the game with ?checkLandmarks, or run `node tools/dev/check-landmarks.mjs`,
+// which does that for every map. It must report nothing (see "Road structures" in CLAUDE.md).
+export const LANDMARK_CHECK = typeof location !== 'undefined' && new URLSearchParams(location.search).has('checkLandmarks');
+
 // Place every landmark that falls on this map. `heightAt(x, z)` gives ground height or null;
 // `onRoad(x, z)` says whether a map point is on a road; `routeAt(x, z)` describes the driven
-// road nearest a map point (see landmarkContext).
-export function buildLandmarks(data, heightAt, onRoad = () => false, routeAt = () => null) {
+// road nearest a map point (see landmarkContext). `sl` lets the game draw frames between
+// landmarks (see slicer in world.js).
+export async function buildLandmarks(data, heightAt, onRoad = () => false, routeAt = () => null, sl = null) {
   const group = new THREE.Group();
   group.userData.intrusions = [];
+  let checked = 0;
   for (const L of LANDMARK_LIST) {
+    if (sl) await sl.tick();
     const mod = modules[`./landmarks/${L.id}.js`];
     if (!mod?.build) continue;
     const [x, z] = projectTo(data.origin, L.lon, L.lat);
@@ -107,7 +116,8 @@ export function buildLandmarks(data, heightAt, onRoad = () => false, routeAt = (
     model.rotation.y = a;
     model.name = `landmark:${L.id}`;
     group.add(model);
-    if (import.meta.env?.DEV) {
+    if (LANDMARK_CHECK) {
+      checked++;
       const hits = roadIntrusions(model, routeAt);
       if (hits.length) {
         group.userData.intrusions.push({ id: L.id, hits });
@@ -115,6 +125,7 @@ export function buildLandmarks(data, heightAt, onRoad = () => false, routeAt = (
       }
     }
   }
+  if (LANDMARK_CHECK) console.info(`Landmark check (${data.id}): ${checked} landmarks checked, ${group.userData.intrusions.length} on the driven road`);
   return group;
 }
 

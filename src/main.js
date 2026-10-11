@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import './style.css';
-import { createWorld, loadMapData } from './world.js';
+import { buildWorld, loadMapData, prefetchMaps, setupSky, slicer, BuildCancelled, resourcesOf } from './world.js';
 import { makeCar, spinWheels, initCarEnvironment, CAR_MODELS, CAR_IDS, PAINTS } from './cars.js';
 import { Traffic } from './traffic.js';
 import { Signals } from './signals.js';
@@ -81,13 +81,67 @@ const ui = {
 
 // --- Three.js setup ---
 const renderer = new THREE.WebGLRenderer({ canvas: $('game'), antialias: true });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
+
+// --- Resolution ---
+// The 3D view is drawn with at most about PIXEL_BUDGET pixels (a Retina laptop screen has
+// twice that), never finer than the screen itself, and never coarser than one pixel per
+// screen point just to meet the budget. It is worked out again when the window is resized
+// or moved to another screen (a Retina laptop and an external monitor differ). If frames
+// still come too slowly while racing, it steps down a little and later back up. (The menu
+// draws every other frame instead: it sits behind the menu card.)
+const PIXEL_BUDGET = 3.0e6;
+const res = { adapt: 1, sum: 0, cpu: 0, n: 0, slow: 0, lastChange: 0, upWait: 5, wentUp: false, from: 0 };
+function basePixelRatio() {
+  const dpr = window.devicePixelRatio || 1;
+  return Math.min(dpr, Math.max(1, Math.sqrt(PIXEL_BUDGET / (window.innerWidth * window.innerHeight))));
+}
+function applyResolution() {
+  const ratio = basePixelRatio() * res.adapt;
+  if (Math.abs(renderer.getPixelRatio() - ratio) > 0.005) renderer.setPixelRatio(ratio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+applyResolution();
+// Moving the window to a screen with another pixel ratio fires no resize event on its own.
+(function watchScreen() {
+  matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener('change', () => {
+    applyResolution();
+    watchScreen();
+  }, { once: true });
+}());
+// Called every racing frame with the time since the last one (s) and the time the frame's
+// own work took (ms). Judged once a second, from 3 s into the race: two slow seconds in a row
+// that aren't the processor's fault (the graphics chip is behind) lower the resolution 15%;
+// a steady 60 fps tries it back up, waiting longer each time going up didn't last.
+function adaptResolution(dt, cpuMs, now) {
+  if (now - res.from < 3000 || dt > 0.1) return; // the start, or a one-off hitch
+  res.sum += dt * 1000;
+  res.cpu += cpuMs;
+  res.n++;
+  if (res.sum < 1000) return;
+  const avg = res.sum / res.n;
+  const cpu = res.cpu / res.n;
+  res.sum = res.cpu = res.n = 0;
+  res.slow = avg > 18 && cpu < avg * 0.6 ? res.slow + 1 : 0;
+  if (res.slow >= 2 && res.adapt > 0.55) {
+    if (res.wentUp && now - res.lastChange < 5000) res.upWait = Math.min(120, res.upWait * 2);
+    res.adapt = Math.max(0.55, res.adapt * 0.85);
+    res.slow = 0;
+    res.wentUp = false;
+    res.lastChange = now;
+    applyResolution();
+  } else if (avg < 17.4 && res.adapt < 1 && now - res.lastChange > res.upWait * 1000) {
+    res.adapt = Math.min(1, res.adapt / 0.85);
+    res.wentUp = true;
+    res.lastChange = now;
+    applyResolution();
+  }
+}
 const maxAnisotropy = renderer.capabilities.getMaxAnisotropy();
 initCarEnvironment(renderer);
 
 const scene = new THREE.Scene();
+setupSky(scene);
 const camera = new THREE.PerspectiveCamera(62, window.innerWidth / window.innerHeight, 0.1, 4000);
 
 const effects = new Effects(scene);
@@ -195,38 +249,110 @@ function selectCar(id) {
 }
 
 // --- Map selection ---
+// The new map is built a few milliseconds at a time while the menu keeps running (the old
+// map stays on screen), its shaders are compiled and textures uploaded in the background,
+// and only then does it replace the old one, whose GPU memory is freed. Picking another map
+// meanwhile cancels the build.
 let loadToken = 0;
 async function selectMap(id) {
   prefs.map = id;
   savePrefs();
   renderMenu();
   const token = ++loadToken;
+  const stale = () => token !== loadToken;
   S.mode = 'loading';
   ui.loading.textContent = 'Loading Edmonton…';
   ui.loading.classList.add('show');
+  let next = null;
   try {
     const data = await loadMapData(id);
-    if (token !== loadToken) return;
-    world?.dispose();
-    signals?.dispose();
-    world = createWorld(scene, data, { maxAnisotropy });
-    route = world.route;
+    if (stale()) return;
+    const sl = slicer(8, stale);
+    next = await buildWorld(data, { maxAnisotropy, sl });
     // Skip signals in the last stretch so they don't block the ending camera.
-    signals = new Signals(scene, route, activeSignals(data.signals, route.length));
+    const nextSignals = new Signals(next.route, activeSignals(data.signals, next.route.length));
+    next.group.add(nextSignals.group);
+    await sl.tick();
+    await warmUp(next.group, sl);
+    await persistentReady;
+    if (stale()) throw new BuildCancelled('cancelled');
+
+    const old = world;
+    world = next;
+    next = null;
+    scene.add(world.group);
+    old?.dispose(world.group);
+    route = world.route;
+    signals = nextSignals;
     traffic.setWorld(route, signals);
     nitroCans.setRoute(route);
     mysteryBoxes.setRoute(route);
     ending.setRoute(route, world.heightAt, mapInfo().cheer, mapInfo().ending);
+    renderer.compile(ending.root, camera, scene);
     ui.credits.textContent = `${data.credits} · ${SOUND_CREDITS}`;
     S.landmarks = (data.landmarks || []).map((l) => ({ ...l, shown: false }));
     reset();
     S.mode = 'menu';
   } catch (e) {
+    next?.dispose(world?.group);
+    if (e instanceof BuildCancelled || stale()) return;
     console.error(e);
     ui.loading.textContent = `Could not load the map: ${e.message}`;
     return;
   }
   ui.loading.classList.remove('show');
+  if (!prefetched) {
+    prefetched = true;
+    setTimeout(() => prefetchMaps(MAPS.map((m) => m.id)), 1500);
+  }
+}
+let prefetched = false;
+
+// One stand-in object per distinct shader under `root` (same material, same kind of object,
+// same vertex data), so compiling doesn't visit each of the thousands of map pieces.
+function shaderStandIns(root) {
+  const seen = new Set();
+  const group = new THREE.Group();
+  root.traverse((o) => {
+    if (!o.isMesh && !o.isSprite) return;
+    const g = o.geometry;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      const key = [m.uuid, o.type, Boolean(o.instanceColor), g.attributes.color?.itemSize, Boolean(g.attributes.uv1), Boolean(g.attributes.tangent)].join('|');
+      if (seen.has(key)) continue;
+      seen.add(key);
+      let p;
+      if (o.isInstancedMesh) {
+        p = new THREE.InstancedMesh(g, m, 1);
+        if (o.instanceColor) p.setColorAt(0, new THREE.Color());
+      } else p = o.isSprite ? new THREE.Sprite(m) : new THREE.Mesh(g, m);
+      group.add(p);
+    }
+  });
+  return group;
+}
+
+// Compiles every material under `root` (hidden ones too, like the nitro flames) for the
+// scene's lights and fog without blocking (KHR_parallel_shader_compile), then uploads its
+// textures, so nothing stalls when it first appears on screen. Bounding spheres (for
+// skipping what is out of view) are worked out here too, not in the first frame.
+async function warmUp(root, sl) {
+  const meshes = [];
+  root.traverse((o) => { if (o.isMesh) meshes.push(o); });
+  for (const o of meshes) {
+    if (o.isInstancedMesh) {
+      if (!o.boundingSphere) o.computeBoundingSphere();
+    } else if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+    if (sl.due()) await sl.wait();
+  }
+  await renderer.compileAsync(shaderStandIns(root), camera, scene);
+  for (const r of resourcesOf(root)) {
+    if (r.isTexture) renderer.initTexture(r);
+    // A shader's first use looks up its uniforms and attributes; do that now too.
+    const program = r.isMaterial ? renderer.properties.get(r).currentProgram : null;
+    program?.getUniforms();
+    program?.getAttributes();
+    if (sl.due()) await sl.wait();
+  }
 }
 
 // ---------- Map select ----------
@@ -484,6 +610,7 @@ function startRace() {
   S.countdown = 3;
   beepAt = 0;
   snapCamera = true;
+  res.sum = res.cpu = res.n = res.slow = 0;
 }
 
 function setBanner(visible) {
@@ -837,29 +964,44 @@ function updateMenuCamera(t) {
   snapCamera = true;
 }
 
+// The HUD only touches the page when something it shows has changed (every write makes the
+// browser redo style, layout or paint), and the bars move with transforms.
+const hudLast = new Map();
+function hudSet(el, key, value, apply) {
+  const k = el.id + key;
+  if (hudLast.get(k) === value) return;
+  hudLast.set(k, value);
+  apply(value);
+}
+const setText = (el, v) => hudSet(el, '#text', String(v), (x) => { el.textContent = x; });
+const setStyle = (el, prop, v) => hudSet(el, prop, v, (x) => { el.style[prop] = x; });
+const setClass = (el, cls, on) => hudSet(el, `.${cls}`, on, (x) => el.classList.toggle(cls, x));
+
 let landmarkTimer = 0;
 function updateHud(dt) {
   const show = S.mode === 'countdown' || S.mode === 'race';
-  ui.hud.classList.toggle('hidden', !show);
-  ui.touch.classList.toggle('hidden', !(isTouch && show));
+  setClass(ui.hud, 'hidden', !show);
+  setClass(ui.touch, 'hidden', !(isTouch && show));
 
   if (toastTimer > 0) {
     toastTimer -= dt;
     if (toastTimer <= 0) ui.toast.className = '';
   }
-  ui.countdown.textContent = S.mode === 'countdown' ? Math.ceil(S.countdown) : '';
+  setText(ui.countdown, S.mode === 'countdown' ? Math.ceil(S.countdown) : '');
   if (!show) return;
 
   const done = clamp(S.s / route.length, 0, 1);
-  ui.time.textContent = fmt(S.time);
-  ui.dist.textContent = `${(Math.max(0, route.length - S.s) / 1000).toFixed(2)} km`;
-  ui.fill.style.width = `${done * 100}%`;
-  ui.carIcon.style.left = `${done * 100}%`;
-  ui.speed.textContent = Math.round(S.speed * 3.6);
-  ui.speedo.classList.toggle('boost', S.boosting || S.power === 'turbo');
-  ui.nitro.style.width = `${S.nitro * 100}%`;
-  ui.crashes.textContent = S.crashes ? `💥 ${S.crashes}` : '';
-  ui.street.textContent = route.nameAt(S.s) || ' ';
+  setText(ui.time, fmt(S.time));
+  setText(ui.dist, `${(Math.max(0, route.length - S.s) / 1000).toFixed(2)} km`);
+  // The bar has rounded ends, so it keeps its width (in 0.1% steps, a few times a second).
+  const pct = `${Math.round(done * 1000) / 10}%`;
+  setStyle(ui.fill, 'width', pct);
+  setStyle(ui.carIcon, 'left', pct);
+  setText(ui.speed, Math.round(S.speed * 3.6));
+  setClass(ui.speedo, 'boost', S.boosting || S.power === 'turbo');
+  setStyle(ui.nitro, 'transform', `scaleX(${Math.round(S.nitro * 500) / 500})`);
+  setText(ui.crashes, S.crashes ? `💥 ${S.crashes}` : '');
+  setText(ui.street, route.nameAt(S.s) || ' ');
   // Landmark callouts: announce a real landmark as it comes up beside the road.
   for (const l of S.landmarks || []) {
     if (l.shown || S.s < l.s - 160 || S.s > l.s + 40) continue;
@@ -873,14 +1015,14 @@ function updateHud(dt) {
   const corner = route.cornerAhead(S.s + 10, 160);
   const safe = corner.v * stats.grip * 1.15;
   const warn = S.y < 1 && safe < 30 && S.speed > safe * 0.95;
-  ui.turn.classList.toggle('hidden', !warn);
-  if (warn) ui.turn.textContent = `${corner.dir > 0 ? '↱' : '↰'} ${Math.round(safe * 3.6)}`;
+  setClass(ui.turn, 'hidden', !warn);
+  if (warn) setText(ui.turn, `${corner.dir > 0 ? '↱' : '↰'} ${Math.round(safe * 3.6)}`);
 
-  ui.power.classList.toggle('hidden', !S.power || S.power === 'blast');
+  setClass(ui.power, 'hidden', !S.power || S.power === 'blast');
   if (S.power) {
     const p = POWERS[S.power];
-    ui.powerLabel.textContent = `${p.icon} ${p.label}`;
-    ui.powerFill.style.width = `${(S.powerTime / p.duration) * 100}%`;
+    setText(ui.powerLabel, `${p.icon} ${p.label}`);
+    setStyle(ui.powerFill, 'transform', `scaleX(${Math.round((S.powerTime / p.duration) * 500) / 500})`);
   }
 }
 
@@ -941,16 +1083,23 @@ function checkPassBy() {
 // --- Main loop ---
 let t = 0;
 let last = performance.now();
+let frameNo = 0;
+// Until the first map is ready, only the sky is drawn (the camera would sit inside the car).
+const skyOnly = new THREE.Scene();
+skyOnly.background = scene.background;
 
 function frame(now) {
   requestAnimationFrame(frame);
-  const dt = Math.min((now - last) / 1000, 0.05);
+  const work0 = performance.now();
+  const rawDt = (now - last) / 1000;
+  const dt = Math.min(rawDt, 0.05);
   last = now;
   t += dt;
   if (!route || !player) {
-    renderer.render(scene, camera);
+    renderer.render(skyOnly, camera);
     return;
   }
+  const inMenu = S.mode === 'menu' || S.mode === 'loading';
   const input = readInput();
 
   if (S.mode === 'countdown') {
@@ -962,6 +1111,7 @@ function frame(now) {
     }
     if (S.countdown <= 0) {
       S.mode = 'race';
+      res.from = now;
       toast('GO!', 'go');
       sound.play('go');
     }
@@ -973,7 +1123,7 @@ function frame(now) {
   S.invuln = Math.max(0, S.invuln - dt);
 
   signals.update(t);
-  traffic.update(dt, t, S);
+  traffic.update(dt, t, S, camera.position);
   const cans = nitroCans.update(dt, t, S);
   const boxes = mysteryBoxes.update(dt, t, S);
   if (S.mode === 'race') {
@@ -992,7 +1142,7 @@ function frame(now) {
     }
     if (S.s >= route.length - 14) finish();
   }
-  effects.update(dt);
+  effects.update(dt, camera.position);
 
   if (S.mode === 'finished') {
     const before = player.position.clone();
@@ -1012,27 +1162,35 @@ function frame(now) {
     camera.fov = devCam.fov ?? 60;
     camera.updateProjectionMatrix();
   }
+  // Behind the menu card, every other frame is plenty (30 fps).
+  if (inMenu && (frameNo++ & 1)) return;
   renderer.render(scene, camera);
+  if (S.mode === 'race') adaptResolution(rawDt, performance.now() - work0, now);
 }
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  applyResolution();
 });
 
 // Test hook for automated checks; only exists in the dev server.
 if (import.meta.env.DEV) {
   window.__game = {
     S, activatePower, finish, startRace, selectMap, selectCar, progress, sound, traffic, nitroCans, mysteryBoxes,
+    renderer, effects, res,
     get route() { return route; },
     get world() { return world; },
+    get signals() { return signals; },
     set orbit(a) { orbitAngle = a; },
     set cam(v) { devCam = v; },
   };
 }
 
 selectCar(prefs.car);
+// Shaders for everything that stays in the scene (cars, traffic, effects, the ending) compile
+// in the background while the first map is built.
+const persistentReady = renderer.compileAsync(scene, camera);
 selectMap(prefs.map);
 progressReady.then(() => { if (S.mode === 'menu') renderMenu(); loadRanks(); });
 requestAnimationFrame(frame);

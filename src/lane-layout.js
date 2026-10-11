@@ -153,7 +153,19 @@ export function markingPlan(rd, signals = []) {
   const L = rd.left;
   const last = (n - 1) * step - 12; // lines stop just before the finish banner
   const { owZone, boxes } = laneZones(rd, signals);
-  const inBox = (s) => boxes.some(([a, b]) => s > a && s < b);
+  // The signal boxes filed by 16 m stretch, so testing one of the many points is quick.
+  const BUCKET = 16;
+  const buckets = new Map();
+  for (const box of boxes) {
+    for (let k = Math.floor(box[0] / BUCKET); k <= Math.floor(box[1] / BUCKET); k++) {
+      if (!buckets.has(k)) buckets.set(k, []);
+      buckets.get(k).push(box);
+    }
+  }
+  const inBox = (s) => {
+    const list = buckets.get(Math.floor(s / BUCKET));
+    return list !== undefined && list.some(([a, b]) => s > a && s < b);
+  };
   const at = (arr, s) => lerpAt(rd, arr, s);
   const curv = routeCurvature(rd);
   // On a turn tighter than the road is wide, lines on the inside would fold over.

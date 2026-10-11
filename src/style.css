@@ -21,9 +21,10 @@ html, body {
   position: fixed; top: 16px; left: 16px; right: 16px;
   display: flex; align-items: center; gap: 12px;
 }
+/* HUD panels: slightly darker backgrounds instead of a backdrop blur (blurring the moving
+   3D view behind them costs the graphics chip on every frame). */
 .pill {
-  background: rgba(10, 14, 28, 0.6);
-  backdrop-filter: blur(6px);
+  background: rgba(10, 14, 28, 0.72);
   padding: 8px 14px; border-radius: 999px;
   font-weight: 700; font-variant-numeric: tabular-nums;
   white-space: nowrap;
@@ -49,14 +50,14 @@ html, body {
 
 #speedo {
   position: fixed; right: 20px; bottom: 20px; width: 170px;
-  background: rgba(10, 14, 28, 0.6); backdrop-filter: blur(6px);
+  background: rgba(10, 14, 28, 0.72);
   border-radius: 16px; padding: 12px 16px; text-align: right;
 }
 #speed { font-size: 46px; font-weight: 800; font-variant-numeric: tabular-nums; }
 #speedo small { margin-left: 6px; opacity: 0.7; }
 #speedo.boost #speed { color: #5fd4ff; text-shadow: 0 0 14px #29b6ff; }
 #nitro { height: 8px; background: rgba(255,255,255,0.15); border-radius: 999px; margin-top: 6px; overflow: hidden; }
-#nitro-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #29b6ff, #9be7ff); }
+#nitro-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #29b6ff, #9be7ff); transform-origin: left; will-change: transform; }
 #speedo .label { font-size: 11px; letter-spacing: 2px; opacity: 0.7; margin-top: 4px; }
 
 #countdown {
@@ -127,11 +128,11 @@ kbd {
 #power {
   position: fixed; top: 64px; left: 50%; transform: translateX(-50%);
   min-width: 180px; text-align: center;
-  background: rgba(10, 14, 28, 0.6); backdrop-filter: blur(6px);
+  background: rgba(10, 14, 28, 0.72);
   border-radius: 14px; padding: 8px 14px; font-weight: 800; letter-spacing: 1px;
 }
 #power-bar { height: 6px; margin-top: 6px; border-radius: 999px; background: rgba(255,255,255,0.15); overflow: hidden; }
-#power-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff4fd8, #ffd84d, #4fd1ff); }
+#power-fill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff4fd8, #ffd84d, #4fd1ff); transform-origin: left; will-change: transform; }
 #toast.power { color: #ffd84d; }
 
 /* Result card sits in the corner so the ending scene stays visible */

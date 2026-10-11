@@ -347,6 +347,35 @@ function medianArr(a, k) {
   });
 }
 
+// Side roads only where the map has ground. The OSM extract holds the streets along every
+// route, so without this each map file carried ~1,000 km of roads the game can't draw (they
+// lie off its terrain) but still had to index on every load. `inside(x, z)` says whether a
+// point is on the map's ground (plus a margin); a piece that leaves it is cut into the runs
+// that stay on it. Segments are tested every 20 m, so long straight ones aren't lost.
+const ROAD_CLIP_MARGIN = 100;
+function clipRoadsToGround(roads, inside) {
+  const out = [];
+  for (const r of roads) {
+    const n = r.p.length / 2;
+    const at = (k) => [r.p[2 * k] / 10, r.p[2 * k + 1] / 10];
+    let run = null;
+    for (let k = 1; k < n; k++) {
+      const [ax, az] = at(k - 1);
+      const [bx, bz] = at(k);
+      const steps = Math.max(1, Math.ceil(Math.hypot(bx - ax, bz - az) / 20));
+      let keep = false;
+      for (let m = 0; m <= steps && !keep; m++) keep = inside(ax + ((bx - ax) * m) / steps, az + ((bz - az) * m) / steps);
+      if (!keep) { run = null; continue; }
+      if (!run) {
+        run = { ...r, p: r.p.slice(2 * (k - 1), 2 * k) };
+        out.push(run);
+      }
+      run.p.push(r.p[2 * k], r.p[2 * k + 1]);
+    }
+  }
+  return out;
+}
+
 // ---------- road structures (see "Road structures" in CLAUDE.md) ----------
 // Decides, per map, which side roads are raised and how high, so the game only draws what
 // it is given and tools/check-roads.mjs can check it. Side-road pieces get `h` (height of
@@ -1335,6 +1364,14 @@ async function buildMap(m, ptsGlobal, osm) {
     }
     flush();
   });
+  const onGround = clipRoadsToGround(otherRoads, (x, z) => {
+    const i = Math.round((x - gx0) / CELL);
+    const j = Math.round((z - gz0) / CELL);
+    return i >= 0 && j >= 0 && i < nx && j < nz && dist[j * nx + i] <= TERRAIN_RADIUS + ROAD_CLIP_MARGIN;
+  });
+  log(`  side roads clipped to the map's ground: ${otherRoads.length} → ${onGround.length} pieces`);
+  otherRoads.length = 0;
+  for (const r of onGround) otherRoads.push(r);
   // Bridge roads get explicit end heights so the client can draw a straight deck.
   const sampleGrid = (x, z) => {
     const fi = (x - gx0) / CELL;

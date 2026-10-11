@@ -60,23 +60,24 @@ export class Route {
     return Math.max(0, Math.min(this.n - 1, Math.round(s / this.step)));
   }
 
-  // Interpolated centreline point and direction.
+  // Interpolated centreline point and direction. Called many times a frame, so it allocates
+  // nothing when given `out`.
   frame(s, out = {}) {
     const f = Math.max(0, Math.min(this.n - 1.001, s / this.step));
     const i = Math.floor(f);
     const t = f - i;
-    const lerp = (a) => a[i] + (a[i + 1] - a[i]) * t;
-    out.x = lerp(this.x);
-    out.z = lerp(this.z);
-    out.y = lerp(this.y);
-    let tx = lerp(this.tx);
-    let tz = lerp(this.tz);
+    const { x, z, y } = this;
+    out.x = x[i] + (x[i + 1] - x[i]) * t;
+    out.z = z[i] + (z[i + 1] - z[i]) * t;
+    out.y = y[i] + (y[i + 1] - y[i]) * t;
+    const tx = this.tx[i] + (this.tx[i + 1] - this.tx[i]) * t;
+    const tz = this.tz[i] + (this.tz[i + 1] - this.tz[i]) * t;
     const l = Math.hypot(tx, tz) || 1;
     out.tx = tx / l;
     out.tz = tz / l;
-    out.right = lerp(this.rightArr);
-    out.left = lerp(this.leftArr);
-    out.grade = (this.y[i + 1] - this.y[i]) / this.step;
+    out.right = this.rightArr[i] + (this.rightArr[i + 1] - this.rightArr[i]) * t;
+    out.left = this.leftArr[i] + (this.leftArr[i + 1] - this.leftArr[i]) * t;
+    out.grade = (y[i + 1] - y[i]) / this.step;
     return out;
   }
 
@@ -119,7 +120,8 @@ export class Route {
     return [f.left - 0.3 + halfCar, f.right + 0.6 - halfCar];
   }
 
-  // Lowest corner speed in the next `ahead` metres, and which way it turns.
+  // Lowest corner speed in the next `ahead` metres, and which way it turns. The result object
+  // is reused by the next call (read it right away).
   cornerAhead(s, ahead) {
     let v = Infinity;
     let dir = 0;
@@ -131,7 +133,9 @@ export class Route {
         dir = Math.sign(this.curv[i]);
       }
     }
-    return { v, dir };
+    corner.v = v;
+    corner.dir = dir;
+    return corner;
   }
 
   vmaxAt(s) {
@@ -154,3 +158,4 @@ export class Route {
 }
 
 const tmp = {};
+const corner = { v: 0, dir: 0 };

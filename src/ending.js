@@ -408,7 +408,15 @@ export class Ending {
 
   setTheme(name) {
     this.theme = THEMES[name] ?? THEMES.game;
-    for (const g of [this.couch, this.tv, this.person.hand]) g.clear();
+    // Free the previous theme's meshes (each theme builds its own).
+    for (const g of [this.couch, this.tv, this.person.hand]) {
+      g.traverse((o) => {
+        if (o === g) return;
+        o.geometry?.dispose();
+        o.material?.dispose();
+      });
+      g.clear();
+    }
     this.parts = this.theme.build(this);
     this.couch.add(this.parts.seat);
     this.tv.add(this.parts.prop);

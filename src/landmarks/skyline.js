@@ -93,24 +93,6 @@ const place = (pts, x, z, yaw) => {
 };
 const scalePlan = (pts, k, cx = 0, cz = 0) => pts.map(([px, pz]) => [cx + (px - cx) * k, cz + (pz - cz) * k]);
 
-// Oil-drop plan for Rogers Place: round end north, tail south. w = width, len = length.
-function teardrop(w, len) {
-  const R = w / 2, cz = -(len / 2 - R); // centre of the round end
-  const pts = [];
-  for (let a = 180; a <= 360; a += 12) pts.push([R * Math.cos(a * DEG), cz + R * Math.sin(a * DEG)]);
-  const tip = [0, len / 2], side = (sx) => {
-    const P0 = [sx * R, cz], C = [sx * R * 0.78, len * 0.27], P2 = [sx * 9, len / 2 - 8];
-    const out = [];
-    for (let i = 1; i <= 9; i++) {
-      const t = i / 9, u = 1 - t;
-      out.push([u * u * P0[0] + 2 * u * t * C[0] + t * t * P2[0], u * u * P0[1] + 2 * u * t * C[1] + t * t * P2[1]]);
-    }
-    return out;
-  };
-  pts.push(...side(1), [4, len / 2 - 1.5], tip, [-4, len / 2 - 1.5], ...side(-1).reverse());
-  return pts;
-}
-
 const BUILDERS = {
   stantec(P, x, z, T) {
     // Podium (shared Ice District block), office floors, slimmer residential floors, notched top.
@@ -163,14 +145,6 @@ const BUILDERS = {
     P.cyl(19.5, 15, 6, x, 72, z, 24, 0x5a4538); // flared revolving restaurant
     P.cyl(19.8, 19.8, 1.5, x, 78, z, 24, 0x3f3a36);
     P.cyl(5, 5, T.h - 79.5, x, 79.5, z, 12, 0x5a4538);
-  },
-  rogers(P, x, z, T) {
-    const plan = teardrop(T.w, T.d), c = [0, -18];
-    const at = (pts) => place(pts, x, z, T.yaw);
-    P.prism(at(plan), 32, -6, 0xd4d7da, 'glossy'); // brushed stainless shell
-    P.prism(at(scalePlan(plan, 1.012, ...c)), 7, 10, 0x2f4458, 'glass'); // glass band
-    P.prism(at(scalePlan(plan, 0.86, ...c)), 9, 26, 0x4d5157); // stepped dark roof
-    P.prism(at(scalePlan(plan, 0.62, ...c)), T.h - 35, 35, 0x4d5157);
   },
   nationalbank(P, x, z, T, ctx) {
     const [px, pz] = ctx.local(-113.494594, 53.542587);

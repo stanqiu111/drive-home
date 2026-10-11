@@ -1,6 +1,8 @@
 <!doctype html><html><body style="margin:0;background:#222">
 <!-- Dev harness: renders one landmark model from src/landmarks/<id>.js from four angles.
-     Open /landmark-studio.html?id=legislature&dist=180 (dist = camera distance in metres). -->
+     Open /landmark-studio.html?id=legislature&dist=180 (dist = camera distance in metres;
+     &env=0 = lit like the game; &views=az,el;az,el;... = other camera angles;
+     &target=x,y,z = look at that point). -->
 <canvas id="c"></canvas>
 <script type="module">
 import * as THREE from 'three';
@@ -15,7 +17,9 @@ renderer.setPixelRatio(1);
 renderer.setSize(W, H);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.setScissorTest(true);
-setLandmarkEnvMap(new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture);
+// &env=0 renders like the game, which gives landmarks no environment map (glass and metal
+// look darker there).
+if (q.get('env') !== '0') setLandmarkEnvMap(new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xb8c4cc);
 scene.add(new THREE.HemisphereLight(0xffe2c4, 0x3a3a4a, 1.6));
@@ -32,11 +36,13 @@ model.position.y = mod.sink ?? 0;
 scene.add(model);
 const box = new THREE.Box3().setFromObject(model);
 const size = box.getSize(new THREE.Vector3());
-const center = box.getCenter(new THREE.Vector3());
+// &target=x,y,z looks at that model-local point instead of the middle of the model.
+const center = q.get('target') ? new THREE.Vector3(...q.get('target').split(',').map(Number)) : box.getCenter(new THREE.Vector3());
 const dist = Number(q.get('dist')) || Math.max(size.x, size.y, size.z) * 1.6;
 scene.fog = new THREE.Fog(0xe0866a, dist * 1.2, dist * 5);
 const cam = new THREE.PerspectiveCamera(40, (W / 2) / (H / 2), 1, 20000);
-const VIEWS = [[-35, 18], [55, 12], [215, 25], [145, 50]]; // [azimuth deg from north, elevation deg]
+const VIEWS = q.get('views') ? q.get('views').split(';').map((v) => v.split(',').map(Number)) // [azimuth deg from north, elevation deg]
+  : [[-35, 18], [55, 12], [215, 25], [145, 50]];
 VIEWS.forEach(([az, el], i) => {
   const x = (i % 2) * (W / 2), y = (1 - Math.floor(i / 2)) * (H / 2);
   renderer.setViewport(x, y, W / 2, H / 2);
@@ -46,6 +52,6 @@ VIEWS.forEach(([az, el], i) => {
   cam.lookAt(center);
   renderer.render(scene, cam);
 });
-window.info = { size: size.toArray().map((v) => +v.toFixed(1)), min: box.min.toArray().map((v) => +v.toFixed(1)), max: box.max.toArray().map((v) => +v.toFixed(1)), triangles: (() => { let t = 0; model.traverse((o) => { if (o.isMesh) { const g = o.geometry; t += (g.index ? g.index.count : g.attributes.position.count) / 3; } }); return Math.round(t); })() };
+window.info = { size: size.toArray().map((v) => +v.toFixed(1)), min: box.min.toArray().map((v) => +v.toFixed(1)), max: box.max.toArray().map((v) => +v.toFixed(1)), triangles: (() => { let t = 0; model.traverse((o) => { if (o.isMesh) { const g = o.geometry; t += ((g.index ? g.index.count : g.attributes.position.count) / 3) * (o.isInstancedMesh ? o.count : 1); } }); return Math.round(t); })() };
 window.ready = true;
 </script></body></html>

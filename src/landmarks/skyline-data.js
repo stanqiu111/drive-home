@@ -19,8 +19,6 @@ export const SKYLINE_TOWERS = [
     look: 'Very slim pale-beige concrete apartment tower, 33 x 32 m, with a balcony grid on every floor and vertical ribs.' },
   { id: 'lacombe', name: 'Chateau Lacombe', lon: -113.493924, lat: 53.539121, h: 80, w: 52, d: 44, yaw: 0, excludeR: 39,
     look: 'Ribbed brown concrete cylinder, 30 m across, with a flared revolving-restaurant top, on a low podium.' },
-  { id: 'rogers', name: 'Rogers Place', lon: -113.497484, lat: 53.546539, h: 42, w: 163, d: 205, yaw: 12, excludeR: 105,
-    look: 'Oil-drop-shaped arena: brushed stainless shell with a dark glass band, dark grey stepped roof; the drop\'s tail points south to the Winter Garden.' },
   { id: 'nationalbank', name: 'National Bank Centre (Manulife Place)', lon: -113.494395, lat: 53.542628, h: 146, w: 40, d: 59, yaw: 0, excludeR: 41,
     look: 'Dark green reflective glass tower, 40 x 59 m, on a wide low shopping podium.' },
   { id: 'bell', name: 'Bell Tower', lon: -113.494326, lat: 53.544986, h: 130, w: 43, d: 43, yaw: 0, excludeR: 35,

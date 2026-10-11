@@ -35,34 +35,63 @@ const hondaBadge = (put, y, w, off = 0.016) => {
 
 export const CAR_MODELS = {
   modelx: {
+    // The Model X as on tesla.com/en_ca in Oct 2026 (now out of production, ending with a Signature
+    // Edition; the 2021 refresh body with the latest bumper). Official sizes (Model X owner's manual): 5,057 long, 1,999 wide
+    // (2,271 with mirrors), 1,680 tall, wheelbase 2,965, overhangs 988 / 1,104, track 1,705 / 1,710,
+    // ground clearance 166; standard 20" wheels, 265/45R20 front and 275/45R20 rear. The side, roof and
+    // window lines below were measured off Tesla's own configurator renders.
     brand: 'Tesla', name: 'Model X', color: 0xf2f2f0, desc: 'Falcon-wing family rocket. Heavy.', heavy: true,
-    len: 5.04, width: 2.0, wheelR: 0.37, tireW: 0.255, axles: [1.48, -1.49], round: 0.24,
-    section: { shoulder: 0.55, belt: 0.06, tuck: 0.085, crease: 2.0, crown: 0.035, gap: 0.055, rocker: false },
-    side: [[2.52, 0.42, 0.66], [2.42, 0.3, 0.86], [2.15, 0.28, 0.98], [1.55, 0.28, 1.06], [0, 0.28, 1.1], [-1.6, 0.29, 1.12], [-2.2, 0.31, 1.08], [-2.45, 0.38, 0.98], [-2.52, 0.48, 0.86]],
-    plan: [[2.52, 0.76], [2.3, 0.93], [1.8, 0.99], [-1.8, 1.0], [-2.3, 0.95], [-2.52, 0.82]],
-    cabin: [[1.62, 1.07, 0.84], [0.9, 1.5, 0.76], [0.2, 1.68, 0.72], [-0.5, 1.69, 0.72], [-1.2, 1.6, 0.73], [-1.8, 1.44, 0.76], [-2.25, 1.24, 0.8], [-2.45, 1.1, 0.84]],
+    len: 5.057, width: 2.0, wheelR: 0.375, tireW: 0.27, axles: [1.5405, -1.4245], round: 0.16, nose: 0.24, tail: 0.15,
+    // Black sill between the wheels and black lower rear bumper; a thin black lip at the front.
+    section: {
+      shoulder: 0.55, belt: 0.06, tuck: 0.085, crease: 2.0, crown: 0.07, gap: 0.065, rocker: false, faceFade: true,
+      sill: [[2.5285, 0], [2.3, 0], [2.15, 0.035], [1.95, 0.15], [-1.9, 0.15], [-2.1, 0.17], [-2.32, 0.15], [-2.5285, 0]],
+    },
+    // Long, domed hood that meets the windshield just behind the front wheel; tall, flat tail.
+    side: [[2.5285, 0.27, 0.76], [2.45, 0.2, 0.8], [2.37, 0.18, 0.85], [2.26, 0.17, 0.89], [2.15, 0.165, 0.935], [2.03, 0.163, 0.98], [1.87, 0.162, 1.02], [1.66, 0.162, 1.048], [1.46, 0.162, 1.06], [1.3, 0.162, 1.06],
+      [1.16, 0.162, 1.06], [0.84, 0.162, 1.077], [0.44, 0.162, 1.093], [0.03, 0.162, 1.117], [-0.37, 0.162, 1.133], [-0.78, 0.162, 1.15], [-1.18, 0.162, 1.182], [-1.59, 0.164, 1.226],
+      [-1.9, 0.17, 1.26], [-2.1, 0.2, 1.272], [-2.28, 0.23, 1.278], [-2.42, 0.26, 1.24], [-2.5285, 0.31, 1.19]],
+    plan: [[2.5285, 0.74], [2.4, 0.88], [2.15, 0.96], [1.8, 0.995], [1.54, 1.0], [-1.42, 1.0], [-1.9, 0.99], [-2.2, 0.95], [-2.4, 0.88], [-2.5285, 0.76]],
+    // One long arc from the windshield base to the hatch, peaking over the second row.
+    cabin: [[1.3, 1.11, 0.86], [1.0, 1.285, 0.8], [0.6, 1.478, 0.74], [0.2, 1.61, 0.71], [-0.5, 1.678, 0.69], [-1.0, 1.657, 0.69], [-1.5, 1.574, 0.7], [-1.9, 1.46, 0.72], [-2.15, 1.36, 0.74], [-2.28, 1.31, 0.75]],
     // The panoramic windshield sweeps right up over the front seats; behind it the roof is the
-    // painted skin of the falcon-wing doors. Chrome-trimmed side glass ends in a sharp point.
-    windows: { belt: 0.05, top: 0.1, trim: true, bands: [{ u0: 1.42, u1: -1.98, k0: 0.7, k1: 0.5 }], pillars: [0.12, -1.22] },
-    windshield: [1.58, -0.25], backlight: [-1.45, -2.36],
-    rim: { n: 5, style: 'aero', color: 0x7a7f87 },
-    doors: [1.45, 0.15, -1.15],
+    // painted skin of the falcon-wing doors. One long run of side glass (gloss-black B pillar) that
+    // rises to a sharp point under the hatch; black frit round the windshield (black A pillars).
+    windows: { belt: -0.05, top: 0.1, bands: [{ u0: 1.16, u1: -1.88, k0: 0.59, k1: 0.31 }], pillars: [-0.255], kick: [[-1.62, 0], [-1.88, 0.085]] },
+    windshield: [1.28, -0.28], backlight: [-1.55, -2.22], glassFrame: true,
+    mirror: { u: 0.73, y: -0.03, out: 0.13 },
+    rim: { n: 5, style: 'split', color: 0x34373b },
+    doors: [1.0, -0.2, -1.42],
     stats: { top: 1.05, accel: 1.3, grip: 0.95 },
     details(c) {
-      // Grille-less nose: swept headlights, a slim lower intake, the "T".
-      c.front('lens', [[0.44, 0.79], [0.8, 0.84], [0.9, 0.79], [0.86, 0.73], [0.5, 0.74]]);
-      c.front('head', [[0.48, 0.79], [0.82, 0.835], [0.85, 0.81], [0.5, 0.77]], 0.018);
-      c.frontMid('grille', [[-0.58, 0.36], [0.58, 0.36], [0.64, 0.47], [-0.64, 0.47]]);
-      c.front('dark', [[0.68, 0.38], [0.82, 0.4], [0.84, 0.56], [0.72, 0.52]]);
-      c.frontMid('chrome', [[-0.06, 0.74], [0.06, 0.74], [0.06, 0.72], [0.012, 0.72], [0.012, 0.65], [-0.012, 0.65], [-0.012, 0.72], [-0.06, 0.72]], 0.016);
-      // Rear: wide tail lights that wrap round the corners, black diffuser.
-      c.rear('tail', [[0.36, 0.98], [0.86, 1.0], [0.93, 0.94], [0.88, 0.9], [0.38, 0.93]]);
-      c.rear('tail', [[0.68, 0.52], [0.86, 0.53], [0.86, 0.56], [0.68, 0.55]]);
-      c.rearMid('dark', [[-0.78, 0.36], [0.78, 0.36], [0.72, 0.5], [-0.72, 0.5]]);
-      c.rearMid('chrome', rect(-0.16, 0.9, 0.16, 0.92), 0.016);
-      c.plate(0.72);
+      // Grille-less nose (traced from Tesla's renders): slim headlights that sweep back along the
+      // fenders, joined by a black brow bar that carries the "T" and dips to a point under it.
+      c.front('lens', [[0.637, 0.764], [0.745, 0.806], [0.841, 0.835], [0.886, 0.855], [0.936, 0.863], [0.946, 0.825], [0.952, 0.78], [0.946, 0.738], [0.912, 0.728], [0.837, 0.729], [0.748, 0.74]], 0.012, 0.7);
+      // LED running light along the lower edge, curling up at the outer end.
+      c.front('head', [[0.64, 0.765], [0.75, 0.744], [0.84, 0.733], [0.91, 0.732], [0.944, 0.742], [0.951, 0.785], [0.948, 0.8], [0.938, 0.79], [0.932, 0.752], [0.905, 0.745], [0.84, 0.746], [0.75, 0.757], [0.66, 0.772]], 0.018, 0.7);
+      c.frontMid('dark', [[-0.56, 0.69], [-0.5, 0.715], [-0.3, 0.742], [0, 0.748], [0.3, 0.742], [0.5, 0.715], [0.56, 0.69], [0.45, 0.694], [0.2, 0.7], [0.055, 0.7], [0, 0.645], [-0.055, 0.7], [-0.2, 0.7], [-0.45, 0.694]], 0.014);
+      c.front('dark', [[0.55, 0.69], [0.64, 0.758], [0.633, 0.766], [0.54, 0.697]], 0.014, 0.4);
+      c.frontMid('chrome', [[-0.055, 0.742], [0.055, 0.742], [0.055, 0.727], [0.011, 0.727], [0.011, 0.672], [-0.011, 0.672], [-0.011, 0.727], [-0.055, 0.727]], 0.018);
+      // Air-curtain slot at each corner with its curved outer edge, and the wide black lower intake.
+      c.front('dark', [[0.667, 0.512], [0.804, 0.538], [0.912, 0.554], [0.945, 0.558], [0.943, 0.533], [0.912, 0.529], [0.804, 0.515]], 0.012, 0.45);
+      // (The current bumper's hook at the slot's outer end is short: it stops halfway down.)
+      c.front('dark', [[0.93, 0.535], [0.92, 0.47], [0.9, 0.41], [0.895, 0.412], [0.915, 0.47], [0.926, 0.535]], 0.012, 0.45);
+      c.frontMid('grille', [[-0.61, 0.425], [0.61, 0.425], [0.7, 0.33], [0.66, 0.305], [-0.66, 0.305], [-0.7, 0.33]]);
+      // Rear: smoked lamps that run from the rear fenders onto the hatch, with the red C-shaped
+      // light guide, joined by a black bar carrying the TESLA letters.
+      c.rear('lens', [[0.967, 0.93], [0.942, 0.997], [0.91, 1.047], [0.872, 1.06], [0.684, 1.057], [0.633, 1.022], [0.609, 0.948], [0.839, 0.899], [0.933, 0.9], [0.96, 0.914]], 0.012, 0.55);
+      c.rear('tail', [[0.93, 1.005], [0.905, 1.042], [0.87, 1.053], [0.69, 1.05], [0.642, 1.02], [0.62, 0.955], [0.8, 0.912], [0.8, 0.935], [0.66, 0.965], [0.672, 1.012], [0.7, 1.03], [0.865, 1.032], [0.9, 1.022], [0.925, 0.99]], 0.016, 0.55);
+      c.rear('tail', [[0.962, 0.952], [0.93, 0.957], [0.934, 0.93], [0.964, 0.928]], 0.016, 0.55);
+      c.rearMid('dark', [[-0.63, 1.012], [-0.44, 1.018], [0, 1.027], [0.44, 1.018], [0.63, 1.012], [0.607, 0.966], [0.46, 0.979], [0, 0.987], [-0.46, 0.979], [-0.607, 0.966]]);
+      for (let k = -2; k <= 2; k++) c.rearMid('chrome', rect(k * 0.11 - 0.024, 0.997, k * 0.11 + 0.024, 1.015), 0.016);
+      // Hatch shut line round the plate recess, black diffuser with red reflectors.
+      const thin = (pts, w = 0.007) => [...pts.map(([x, y]) => [x + w, y + w]), ...[...pts].reverse().map(([x, y]) => [x - w, y - w])];
+      c.rear('dark', thin([[0.7, 0.9], [0.705, 0.765], [0.68, 0.722], [0.6, 0.714], [0.002, 0.711]], 0.004), 0.013);
+      c.plate(0.885);
+      c.rearMid('dark', [[-0.92, 0.53], [-0.7, 0.54], [0, 0.535], [0.7, 0.54], [0.92, 0.53], [0.9, 0.37], [0.69, 0.36], [0, 0.35], [-0.69, 0.36], [-0.9, 0.37]], 0.012, 0.5);
+      c.rear('tail', [[0.508, 0.491], [0.782, 0.507], [0.777, 0.467], [0.506, 0.45]], 0.016);
       // Small lip spoiler at the top of the hatch.
-      c.box('paint', 0, 1.13, 2.39, 1.25, 0.025, 0.1);
+      c.box('paint', 0, 1.315, 2.33, 1.2, 0.025, 0.12);
     },
   },
   crv: {
@@ -334,38 +363,97 @@ export const CAR_MODELS = {
     },
   },
   carnival: {
+    // The 2027 Carnival as on kia.ca (the 2025 facelift look, "Star Map" lights), SX trim as in Kia
+    // Canada's 360 view: 19" wheels, roof rails. Official sizes: 5,155 long, 1,995 wide (2,266 with
+    // mirrors), 1,740 tall (1,775 with roof rails), wheelbase 3,090, overhangs 935 / 1,130, track
+    // 1,740, 235/55R19 tyres. Profile and window lines measured off Kia Canada's 360 renders.
     brand: 'Kia', name: 'Carnival', color: 0xeeeeea, desc: '7 seats, sliding doors. Heavy.', heavy: true,
-    len: 5.16, width: 2.0, wheelR: 0.37, tireW: 0.235, axles: [1.62, -1.47], round: 0.15, cladding: true, fin: -2.0,
-    section: { shoulder: 0.6, belt: 0.045, tuck: 0.06, crease: 1.6, crown: 0.025, flare: 0.015, gap: 0.06 },
-    side: [[2.58, 0.4, 0.84], [2.45, 0.3, 1.0], [2.1, 0.3, 1.08], [1.45, 0.3, 1.14], [0, 0.31, 1.15], [-1.8, 0.32, 1.18], [-2.45, 0.35, 1.18], [-2.55, 0.42, 1.1], [-2.58, 0.5, 1.0]],
-    plan: [[2.58, 0.8], [2.4, 0.93], [2.0, 0.99], [-2.2, 0.99], [-2.5, 0.94], [-2.58, 0.86]],
-    cabin: [[1.45, 1.15, 0.82], [0.75, 1.7, 0.78], [0.5, 1.76, 0.78], [-1.9, 1.76, 0.78], [-2.35, 1.72, 0.8], [-2.53, 1.22, 0.84]],
-    // Long flat glass line in black, with the Carnival's big chrome blade on the D pillar.
-    windows: {
-      belt: 0.05, top: 0.08, trim: true, bands: [{ u0: 1.3, u1: -2.3, k0: 0.75, k1: 30 }], pillars: [0.0, -1.4],
-      extra: [{ u0: -1.86, u1: -2.08, k0: 2.2, k1: 30, mat: 'chrome', off: 0.02 }],
+    len: 5.155, width: 2.0, wheelR: 0.37, tireW: 0.235, axles: [1.6425, -1.4475], round: 0.15, cladding: true, fin: -1.95,
+    // Thin black arch mouldings close to the tyres, black sill, tall black lower rear bumper.
+    section: {
+      shoulder: 0.6, belt: 0.045, tuck: 0.06, crease: 1.6, crown: 0.025, flare: 0.015, gap: 0.035, mold: 0.04, faceFade: true,
+      sill: [[2.5775, 0.12], [2.2, 0.2], [1.9, 0.2], [1.2, 0.17], [-1.0, 0.17], [-1.9, 0.33], [-2.3, 0.36], [-2.5775, 0.3]],
     },
-    windshield: [1.4, 0.78], backlight: [-2.36, -2.5],
-    rim: { n: 10, style: 'multi', color: 0xc4c8ce },
-    doors: [1.3, 0.0, -1.4], handles: [0.14, -0.12],
+    // Tall upright nose under a long, nearly flat hood.
+    side: [[2.5775, 0.3, 0.93], [2.49, 0.25, 0.985], [2.41, 0.245, 1.012], [2.3, 0.245, 1.052], [2.2, 0.242, 1.083], [2.0, 0.24, 1.124], [1.8, 0.24, 1.155], [1.6, 0.243, 1.175], [1.48, 0.245, 1.185],
+      [1.263, 0.247, 1.146], [1.07, 0.247, 1.166], [0.074, 0.247, 1.166], [-0.058, 0.247, 1.2], [-0.8, 0.247, 1.2], [-1.22, 0.247, 1.215], [-1.6, 0.25, 1.22],
+      [-1.9, 0.271, 1.225], [-2.1, 0.305, 1.225], [-2.3, 0.344, 1.215], [-2.45, 0.37, 1.2], [-2.5775, 0.4, 1.17]],
+    // Seen from above both ends are well rounded: the lamps wrap round the corners (positions
+    // triangulated from three of Kia's 360 frames).
+    plan: [[2.5775, 0.45], [2.52, 0.58], [2.47, 0.64], [2.42, 0.69], [2.36, 0.75], [2.3, 0.82], [2.25, 0.875], [2.18, 0.92], [2.08, 0.96], [1.95, 0.985], [1.8, 0.998], [1.64, 1.0],
+      [-1.45, 1.0], [-1.86, 0.995], [-1.95, 0.98], [-2.05, 0.94], [-2.14, 0.905], [-2.25, 0.88], [-2.35, 0.86], [-2.38, 0.83], [-2.41, 0.77], [-2.45, 0.69],
+      [-2.48, 0.64], [-2.52, 0.56], [-2.5775, 0.45]],
+    // Flat roof to the spoiler, then the raked rear window.
+    cabin: [[1.48, 1.2, 0.86], [1.27, 1.31, 0.84], [1.07, 1.43, 0.82], [0.86, 1.538, 0.805], [0.65, 1.63, 0.795], [0.45, 1.69, 0.79], [0.25, 1.725, 0.79], [0, 1.735, 0.79],
+      [-1.0, 1.738, 0.79], [-2.0, 1.73, 0.795], [-2.2, 1.68, 0.79], [-2.29, 1.6, 0.78], [-2.36, 1.42, 0.75], [-2.44, 1.3, 0.69], [-2.52, 1.19, 0.58], [-2.555, 1.13, 0.5]],
+    // Black glass line (a small step up behind the B pillar) that wraps round the D pillar, and the
+    // Carnival's silver blade between the sliding-door glass and the rear quarter glass, leaning
+    // forward (a chrome skin, with glass laid back over it in front of its slanted front edge).
+    windows: {
+      belt: 0.01, top: 0.13, bands: [{ u0: 1.263, u1: -2.35, k0: 0.62, k1: 6 }], pillars: [0.008], kick: [[-2.2, 0], [-2.35, 0.22]],
+      extra: [
+        { u0: -1.092, u1: -1.442, k0: 40, k1: 2.69, mat: 'chrome', off: 0.02 },
+        { u0: -0.95, u1: -1.222, k0: 40, k1: 2.69, mat: 'glass', off: 0.024 },
+      ],
+    },
+    windshield: [1.46, 0.5], backlight: [-2.31, -2.46], cabinStations: [-2.25, -2.31, -2.37, -2.43, -2.5],
+    mirror: { u: 0.98, y: -0.016, out: 0.11, mat: 'dark', armMat: 'paint' },
+    rim: { n: 5, style: 'split', color: 0x2b2d31 },
+    doors: [1.132, 0.065, -1.13], handles: [0.27, -0.13],
     stats: { top: 0.9, accel: 0.9, grip: 0.92 },
     details(c) {
-      // Full-width "tiger face" grille running into the headlights.
-      c.frontMid('grille', [[-0.66, 0.5], [0.66, 0.5], [0.74, 0.6], [0.74, 0.95], [0.66, 0.99], [-0.66, 0.99], [-0.74, 0.95], [-0.74, 0.6]]);
-      c.frontMid('chrome', rect(-0.7, 0.975, 0.7, 0.99), 0.018);
-      c.front('lens', [[0.66, 0.97], [0.9, 1.01], [0.94, 0.95], [0.74, 0.9]]);
-      c.front('head', [[0.7, 0.975], [0.9, 1.0], [0.91, 0.98], [0.72, 0.955]], 0.018);
-      // Stepped running lights down the corners.
-      c.front('head', [[0.79, 0.6], [0.84, 0.6], [0.9, 0.9], [0.86, 0.91]], 0.016);
-      c.frontMid('dark', [[-0.72, 0.34], [0.72, 0.34], [0.76, 0.47], [-0.76, 0.47]]);
-      c.frontMid('chrome', rect(-0.45, 0.36, 0.45, 0.385), 0.016);
-      // Thin full-width light bar plus corner lamps.
-      c.rearMid('tail', rect(-0.8, 1.1, 0.8, 1.13));
-      c.rear('tail', [[0.78, 0.92], [0.92, 0.94], [0.92, 1.16], [0.78, 1.14]]);
-      c.rearMid('dark', [[-0.86, 0.44], [0.86, 0.44], [0.86, 0.56], [-0.86, 0.56]]);
-      c.rearMid('chrome', rect(-0.12, 1.0, 0.12, 1.02), 0.016);
-      c.plate(0.8);
-      for (const s of [-1, 1]) c.box('dark', s * 0.66, 1.8, 0.85, 0.05, 0.06, 2.6);
+      // Mirrored shapes: a right half from the centre line round to the centre line again.
+      const full = (half) => [...half, ...half.slice(1, -1).reverse().map(([x, y]) => [-x, y])];
+      const thin = (pts, w = 0.004) => [...pts.map(([x, y]) => [x + w, y + w]), ...[...pts].reverse().map(([x, y]) => [x - w, y - w])];
+      // Front (traced from Kia Canada's renders): a stack of four LED lamps at each corner, with the
+      // amber "Star Map" light running down its outer edge and in along the top of the grille.
+      c.front('dark', [[0.88, 1.012], [0.774, 1.004], [0.756, 0.717], [0.782, 0.692], [0.84, 0.692], [0.866, 0.721]], 0.012, 0.35);
+      for (const y of [0.931, 0.868, 0.804, 0.742]) c.front('head', rect(0.785, y - 0.017, 0.835, y + 0.017), 0.016, 0.35);
+      c.front('amber', [[0.878, 0.988], [0.851, 0.98], [0.844, 0.717], [0.866, 0.717]], 0.016, 0.35);
+      c.front('amber', [[0.865, 0.994], [0.58, 0.984], [0.27, 0.968], [0.266, 0.954], [0.579, 0.967], [0.84, 0.973]], 0.016, 0.35);
+      // The lamp housing and the amber line run back along the top of the front fender to a point.
+      c.sideFlat('dark', [[1.91, 1.022], [2.05, 1.006], [2.25, 0.99], [2.25, 0.7], [2.215, 0.835], [2.088, 0.909]]);
+      c.sideFlat('amber', [[1.935, 1.016], [2.05, 1.0], [2.25, 0.983], [2.25, 0.963], [2.05, 0.982], [1.97, 1.006]], 0.012);
+      c.frontMid('chrome', [[-0.268, 0.952], [0.268, 0.952], [0.268, 0.966], [-0.268, 0.966]], 0.014);
+      // The wide grille: chrome frame, black inside, rows of silver dashes, a dip in its lower edge.
+      c.frontMid('chrome', full([[0, 0.962], [0.642, 0.962], [0.686, 0.937], [0.688, 0.784], [0.654, 0.751], [0.409, 0.744], [0.305, 0.707], [0, 0.703]]), 0.012);
+      // (The black sits well clear of the frame so the two never fight where the face curves.)
+      c.frontMid('dark', full([[0, 0.946], [0.632, 0.946], [0.669, 0.926], [0.671, 0.79], [0.645, 0.767], [0.405, 0.76], [0.3, 0.722], [0, 0.719]]), 0.022);
+      [0.915, 0.872, 0.829, 0.786].forEach((y, row) => {
+        for (let k = -6; k <= 6; k++) {
+          const x = (k + (row % 2) * 0.5) * 0.1;
+          if (Math.abs(x) > (row === 3 ? 0.5 : 0.59)) continue;
+          const z = c.at(x, y);
+          if (z != null) c.panel('chrome', x, y, z - 0.03, 0.064, 0.012);
+        }
+      });
+      // KIA wordmark on the nose of the hood.
+      c.frontMid('dark', [[-0.094, 1.022], [-0.082, 1.022], [-0.072, 1.05], [-0.084, 1.05]], 0.014);
+      c.frontMid('dark', [[-0.076, 1.034], [0.0, 1.05], [0.012, 1.05], [-0.07, 1.025]], 0.014);
+      c.frontMid('dark', [[0.012, 1.022], [0.044, 1.05], [0.056, 1.05], [0.072, 1.022], [0.06, 1.022], [0.05, 1.04], [0.024, 1.022]], 0.014);
+      // Lower intake band with the LED fog-lamp cubes and the plate bracket.
+      c.frontMid('dark', [[-0.74, 0.374], [0.74, 0.374], [0.76, 0.541], [-0.76, 0.541]]);
+      c.front('head', rect(0.505, 0.408, 0.609, 0.49), 0.016);
+      c.frontMid('lens', rect(-0.099, 0.379, 0.099, 0.504), 0.016);
+      // Rear: a full-width light bar under the rear glass, its ends turning down into the corner lamps.
+      c.rearMid('tail', [[-0.79, 1.15], [-0.77, 1.227], [0.77, 1.227], [0.79, 1.15], [0.72, 1.177], [-0.72, 1.177]], 0.014, 0.35);
+      // The corner lamps sit on the rounded rear corners, with an arm reaching forward along the
+      // quarter panel (traced from the side view; from behind, their rear edge is the inner edge).
+      c.sideFlat('tail', [[-2.425, 1.195], [-2.342, 1.178], [-2.239, 1.15], [-2.144, 1.1], [-2.21, 1.093], [-2.286, 1.085], [-2.353, 1.085], [-2.353, 0.907], [-2.368, 0.858], [-2.405, 0.9], [-2.415, 1.0], [-2.42, 1.1]], 0.01);
+      c.rearMid('dark', [[-0.098, 1.07], [-0.086, 1.07], [-0.076, 1.11], [-0.088, 1.11]], 0.014);
+      c.rearMid('dark', [[-0.08, 1.087], [0.0, 1.11], [0.012, 1.11], [-0.074, 1.074]], 0.014);
+      c.rearMid('dark', [[0.012, 1.07], [0.046, 1.11], [0.058, 1.11], [0.076, 1.07], [0.064, 1.07], [0.052, 1.096], [0.024, 1.07]], 0.014);
+      c.plate(0.835);
+      // Tailgate shut line, CARNIVAL lettering, black lower bumper with reflectors and a silver skid plate.
+      c.rear('dark', thin([[0.002, 0.615], [0.667, 0.61], [0.702, 0.639], [0.72, 0.799], [0.733, 0.925]]), 0.013);
+      c.rearMid('chrome', rect(-0.69, 0.682, -0.465, 0.698), 0.014);
+      c.rearMid('dark', [[-0.76, 0.64], [-0.496, 0.6], [0, 0.594], [0.496, 0.6], [0.76, 0.64], [0.76, 0.38], [-0.76, 0.38]], 0.012);
+      c.rear('tail', [[0.58, 0.58], [0.74, 0.574], [0.74, 0.54], [0.58, 0.548]], 0.016);
+      c.rear('head', rect(0.74, 0.54, 0.77, 0.574), 0.016);
+      c.rearMid('chrome', rect(-0.497, 0.38, 0.497, 0.426), 0.016);
+      // Low roof rails sitting on the roof, and the roof spoiler over the rear window.
+      for (const s of [-1, 1]) c.box('dark', s * 0.56, 1.755, 0.87, 0.04, 0.04, 2.14);
+      c.box('paint', 0, 1.62, 2.31, 1.45, 0.04, 0.12);
     },
   },
   bike: {
@@ -456,6 +544,8 @@ const plateMat = new THREE.MeshStandardMaterial({ map: plateTex, roughness: 0.6 
 const tireMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1b, roughness: 0.92 });
 const rimMat = new THREE.MeshStandardMaterial({ color: 0x9da3ab, metalness: 0.8, roughness: 0.3 });
 const headMat = new THREE.MeshStandardMaterial({ color: 0xfff6d5, emissive: 0xfff2c0, emissiveIntensity: 1.6 });
+// Amber running lights (decal material 'amber', e.g. the Carnival's "Star Map" light lines).
+const amberMat = new THREE.MeshStandardMaterial({ color: 0xffa424, emissive: 0xff8c00, emissiveIntensity: 0.65 });
 const rimMats = new Map();
 const rimMatFor = (color) => {
   if (!rimMats.has(color)) rimMats.set(color, new THREE.MeshStandardMaterial({ color, metalness: 0.6, roughness: 0.28, envMap, envMapIntensity: 1.1 }));
@@ -683,6 +773,11 @@ const geoCache = new Map();
 //   flare: extra width bulging around the wheel arches (m)
 //   gap: space between the tyre and the top of its wheel arch (m)
 //   rocker: black trim along the bottom of the doors
+//   sill: optional [[u, h], ...]: a black band h metres tall along the bottom of the body (sill and
+//     lower bumpers), stopping at the wheel openings; unlike `cladding` it doesn't ring the arches
+//     (on a car with `cladding`, it sets the height of the cladding instead of the usual 0.17 m)
+//   mold: optional width of the cladding band round the wheel arches (default 0.075 m)
+//   faceFade: optional; keeps dark underbody/trim colours from streaking up the bumper faces
 const SECTION = { shoulder: 0.6, belt: 0.05, tuck: 0.07, crease: 1.6, crown: 0.03, flare: 0, gap: 0.05, rocker: true };
 const SIDE_SAMPLES = 10;
 // Bumpers: the last `nose` / `tail` metres of the body round off like a pillow
@@ -717,6 +812,8 @@ function buildShape(id) {
   const tireW = d.tireW ?? 0.235;
   const nose = d.nose ?? 0.13;
   const tail = d.tail ?? 0.11;
+  const sillAt = S.sill ? monotone(S.sill) : null;
+  const clad = !!d.cladding || !!sillAt;
   // How much the section is shrunk towards its centre at u (1 = not at all).
   const bumper = (u) => {
     if (u > uFront - nose) return bumperScale((u - (uFront - nose)) / nose);
@@ -764,21 +861,25 @@ function buildShape(id) {
     const arch = archAt(u);
     const cutY = arch ? Math.min(sideTop - 0.004, Math.max(sideBot + 0.004, archTop(u))) : null;
     // SUVs: black plastic below this line (the sill, rising into a band around each arch).
-    const MOLD = 0.075;
+    // `mold` sets the band's width round the arches; `sill` keyframes (if given) its height.
+    const MOLD = S.mold ?? 0.075;
     let moldY = -Infinity;
     if (d.cladding) {
-      moldY = y0 + 0.17;
+      moldY = y0 + (sillAt ? sillAt(u) : 0.17);
       for (const A of arches) {
         const du = u - A.u;
         const R = A.R + MOLD;
         if (Math.abs(du) < R) moldY = Math.max(moldY, d.wheelR + Math.sqrt(R * R - du * du));
       }
       moldY = Math.min(sideTop - 0.002, Math.max(sideBot + 0.002, moldY));
+    } else if (sillAt) {
+      // Above the wheel opening's top (where there is one), so the band stops at the arch.
+      moldY = Math.min(sideTop - 0.002, Math.max((cutY ?? sideBot + 0.004) + 0.002, y0 + sillAt(u)));
     }
     const pts = [];
     const shade = [];
     const paintAt = (y) => {
-      if (d.cladding && y < moldY) return 0.13;
+      if (clad && y < moldY) return 0.13;
       return 0.8 + 0.2 * smoothstep(y0, y0 + 0.45, y);
     };
     const push = (x, y, c, inner = false) => {
@@ -806,18 +907,19 @@ function buildShape(id) {
     // same spot make crisp edges: on SUVs where the black cladding starts, and where the
     // wheel opening starts (pinned to the bottom of the side away from the wheels).
     const breakY = cutY ?? sideBot + 0.004;
-    const upperEnd = d.cladding ? moldY : breakY;
+    const upperEnd = clad ? moldY : breakY;
     let edge = -1;
     const UPPER = 6;
     for (let k = 1; k <= UPPER; k++) {
       const y = sideTop - ((sideTop - upperEnd) * k) / (UPPER + 1);
       push(sideX(y), y, paintAt(y));
     }
-    if (d.cladding) {
+    if (clad) {
       push(sideX(moldY), moldY, 0.8 + 0.2 * smoothstep(y0, y0 + 0.45, moldY));
       push(sideX(moldY), moldY, 0.13);
-      for (let k = 1; k <= 3; k++) {
-        const y = moldY - ((moldY - breakY) * k) / 4;
+      const MID = d.cladding ? 3 : 1; // a sill band is short: one point down it is enough
+      for (let k = 1; k <= MID; k++) {
+        const y = moldY - ((moldY - breakY) * k) / (MID + 1);
         push(sideX(y), y, 0.13);
       }
     }
@@ -834,12 +936,12 @@ function buildShape(id) {
     if (cutY != null) push(last[0], last[1], 0.05, true);
     else {
       pts.push([last[0], last[1]]);
-      shade.push(d.cladding ? 0.13 : low ?? shade[shade.length - 1]);
+      shade.push(clad ? 0.13 : low ?? shade[shade.length - 1]);
     }
     for (let k = 1; k <= 3; k++) {
       const a = -(Math.PI / 2) * (k / 3);
       const y = sideBot + rb * Math.sin(a);
-      push(wb - rb + rb * Math.cos(a), y, d.cladding ? 0.13 : low ?? paintAt(y), cutY != null);
+      push(wb - rb + rb * Math.cos(a), y, clad ? 0.13 : low ?? paintAt(y), cutY != null);
     }
     push((wb - rb) * 0.5, y0, 0.2, cutY != null);
     push(0, y0, 0.2);
@@ -852,6 +954,12 @@ function buildShape(id) {
       for (const p of pts) {
         p[0] *= c;
         p[1] = cy + (p[1] - cy) * c;
+      }
+      // faceFade: on the rounded bumper faces, fade the dark underbody and trim colours back
+      // to paint as the section shrinks, so they don't streak up to the middle of the face.
+      if (S.faceFade) {
+        const f = smoothstep(0.85, 0.45, c);
+        for (let k = 0; k < shade.length; k++) shade[k] += (1 - shade[k]) * f;
       }
     }
     return { pts, shade, edge: cutY != null ? edge : -1 };
@@ -999,15 +1107,17 @@ function buildShape(id) {
     if (body.length && body[body.length - 1].u - u < 0.002) continue;
     body.push(mirrored(section(u), u));
   }
-  // Glass house sits on the belt line, narrower at the roof (tumblehome).
+  // Glass house sits on the belt line, narrower at the roof (tumblehome). `cabinStations` adds
+  // sections where the roof bends sharply, so the glass laid on it stays on the surface.
   const glassHouse = (m) => {
-    const out = [];
-    for (let i = 0; i < m; i++) {
-      const u = cFront + ((cBack - cFront) * i) / (m - 1);
+    const us = [];
+    for (let i = 0; i < m; i++) us.push(cFront + ((cBack - cFront) * i) / (m - 1));
+    for (const u of d.cabinStations || []) if (u < cFront && u > cBack) us.push(u);
+    us.sort((a, b) => b - a);
+    return us.map((u) => {
       const g = gh(u);
-      out.push({ u, pts: ring(g.y0, g.y1, g.wb, g.wt, 0.02, rtG) });
-    }
-    return out;
+      return { u, pts: ring(g.y0, g.y1, g.wb, g.wt, 0.02, rtG) };
+    });
   };
   const glass = glassHouse(30);
 
@@ -1144,10 +1254,10 @@ function windowGeos(d, fn, add) {
 }
 
 // Windshield / rear window as skins over the top of the glass house.
-function topPane(fn, ua, ub, inset, add, mat = 'glass', lift = 0.012) {
+function topPane(fn, ua, ub, inset, add, mat = 'glass', lift = 0.012, step = 0.03) {
   const tris = [];
   const cols = 10;
-  const rows = Math.max(2, Math.ceil(Math.abs(ua - ub) / 0.03));
+  const rows = Math.max(2, Math.ceil(Math.abs(ua - ub) / step));
   const P = (u, t) => {
     const g = fn.gh(u);
     const rt = Math.min(fn.rtG, g.wt, (g.y1 - g.y0) / 2);
@@ -1175,16 +1285,16 @@ function buildParts(d, fn) {
   };
 
   const nrm = new THREE.Vector3();
-  // How far back from the bumper tips a front/rear decal may wrap round the corners (m;
-  // opt-in per car: `wrap`).
+  // How far back from the bumper tips a front/rear decal may wrap round the corners (m):
+  // opt-in per car (`wrap`) and per decal (the helpers' last argument).
   const WRAP_DEPTH = d.wrap ?? 0.32;
-  const decal = (mat, pts, front, off, mirror) => {
+  const decal = (mat, pts, front, off, mirror, wrap = WRAP_DEPTH) => {
     const cache = new Map();
     const map = (x, y) => {
       const key = `${x.toFixed(5)},${y.toFixed(5)}`;
       if (!cache.has(key)) {
         const u = fn.surfaceU(x, y, front);
-        if (u == null || (front ? fn.uFront - u : u - fn.uBack) > WRAP_DEPTH) cache.set(key, null);
+        if (u == null || (front ? fn.uFront - u : u - fn.uBack) > wrap) cache.set(key, null);
         else {
           fn.surfaceNormal(x, y, front, nrm);
           cache.set(key, [x + nrm.x * off, y + nrm.y * off, -u + nrm.z * off]);
@@ -1300,14 +1410,56 @@ function buildParts(d, fn) {
   };
 
   const ctx = {
-    front: (mat, pts, off = 0.012) => decal(mat, pts, true, off, true),
-    frontMid: (mat, pts, off = 0.012) => decal(mat, pts, true, off, false),
-    rear: (mat, pts, off = 0.012) => decal(mat, pts, false, off, true),
-    rearMid: (mat, pts, off = 0.012) => decal(mat, pts, false, off, false),
+    front: (mat, pts, off = 0.012, wrap) => decal(mat, pts, true, off, true, wrap),
+    frontMid: (mat, pts, off = 0.012, wrap) => decal(mat, pts, true, off, false, wrap),
+    rear: (mat, pts, off = 0.012, wrap) => decal(mat, pts, false, off, true, wrap),
+    rearMid: (mat, pts, off = 0.012, wrap) => decal(mat, pts, false, off, false, wrap),
     side: (mat, pts, off = 0.006, shade) => sideDecal(mat, pts, off, shade),
     plate(y) {
       decal('dark', rect(-0.18, y - 0.095, 0.18, y + 0.095), false, 0.012, false);
       decal('plate', rect(-0.16, y - 0.08, 0.16, y + 0.08), false, 0.018, false);
+    },
+    // A simpler side decal than side(): the [u, y] outline pushed straight out from the body
+    // by `off`, flat-shaded (the Carnival's lights; side() follows the surface's curve).
+    sideFlat(mat, pts, off = 0.008) {
+      const contour = pts.map(([u, y]) => new THREE.Vector2(u, y));
+      const faces = THREE.ShapeUtils.triangulateShape(contour, []);
+      const S = 4;
+      for (const s of [-1, 1]) {
+        const tris = [];
+        const P = (u, y) => {
+          const x = fn.bodyX(u, y);
+          return x > 0 ? [s * (x + off), y, -u] : null;
+        };
+        for (const [ia, ib, ic] of faces) {
+          const A = contour[ia];
+          const B = contour[ib];
+          const C = contour[ic];
+          const at = (i, j) => [A.x + ((B.x - A.x) * i + (C.x - A.x) * j) / S, A.y + ((B.y - A.y) * i + (C.y - A.y) * j) / S];
+          for (let i = 0; i < S; i++) {
+            for (let j = 0; j < S - i; j++) {
+              const cells = [[at(i, j), at(i + 1, j), at(i, j + 1)]];
+              if (j < S - i - 1) cells.push([at(i + 1, j), at(i + 1, j + 1), at(i, j + 1)]);
+              for (const cell of cells) {
+                const v = cell.map(([u, y]) => P(u, y));
+                if (v.every(Boolean)) tris.push(...v);
+              }
+            }
+          }
+        }
+        if (tris.length) add(mat, triMesh(tris, new THREE.Vector3(s, 0, 0)));
+      }
+    },
+    // z of the body surface seen from the front (or the back) at (x, y), for placing small parts.
+    at: (x, y, front = true) => {
+      const u = fn.surfaceU(x, y, front);
+      return u == null ? null : -u;
+    },
+    // A flat w × h panel facing forwards (or backwards): two triangles, for small flat parts.
+    panel(mat, x, y, z, w, h, front = true) {
+      const g = new THREE.PlaneGeometry(w, h);
+      if (front) g.rotateY(Math.PI);
+      add(mat, g.translate(x, y, z));
     },
     box(mat, x, y, z, w, h, dpt, tilt = 0) {
       const g = new THREE.BoxGeometry(w, h, dpt);
@@ -1324,10 +1476,14 @@ function buildParts(d, fn) {
   };
   d.details(ctx);
 
-  // Glass.
+  // Glass. `glassFrame`: a black border round the windshield and rear window that wraps down to
+  // the side glass (black A pillars).
   windowGeos(d, fn, add);
-  if (d.windshield) topPane(fn, d.windshield[0], d.windshield[1], 0.07, add);
-  if (d.backlight) topPane(fn, d.backlight[0], d.backlight[1], 0.08, add);
+  for (const [pane, inset] of [[d.windshield, 0.07], [d.backlight, 0.08]]) {
+    if (!pane) continue;
+    if (d.glassFrame) topPane(fn, pane[0] + 0.03, pane[1] - 0.03, 0, add, 'dark', 0.008, 0.07);
+    topPane(fn, pane[0], pane[1], inset, add);
+  }
 
   // Wipers resting at the bottom of the windshield.
   if (d.windshield) {
@@ -1375,20 +1531,22 @@ function buildParts(d, fn) {
   }
 
   // Mirrors: a rounded shell on a short arm at the bottom corner of the side glass.
-  // Opt-in per car: `mirror: { u, mat, dx, dy }`: where along the car (default 0.3 m behind
-  // the windshield base), the shell's material (default paint), and moves out / up (m).
+  // Opt-in per car: `mirror: { u, y, out, dx, dy, mat, armMat }`: where along the car (default
+  // 0.3 m behind the windshield base), its base height above the belt (default 0.02 m), how
+  // far out the shell sits (default 0.17 m), extra moves out / up (m), the shell's material
+  // (default paint) and the arm's (default: the shell's).
   const mirror = d.mirror || {};
   for (const s of [-1, 1]) {
     const u = mirror.u ?? fn.cFront - 0.3;
-    const yBase = fn.top(u) + 0.02;
+    const yBase = fn.top(u) + (mirror.y ?? 0.02);
     const x = fn.ghX(u, yBase + 0.05);
     const y = yBase + 0.1 + (mirror.dy ?? 0);
-    const dx = mirror.dx ?? 0;
+    const out = (mirror.out ?? 0.17) + (mirror.dx ?? 0);
     const shell = new THREE.SphereGeometry(0.1, 14, 10).scale(1.05, 0.62, 0.55);
-    add(mirror.mat || 'paint', shell.translate(s * (x + 0.17 + dx), y, -u));
-    add('dark', new THREE.CircleGeometry(0.088, 14).scale(1.05, 0.58, 1).translate(s * (x + 0.17 + dx), y, -u + 0.052));
-    const arm = new THREE.BoxGeometry(0.16 + dx, 0.05, 0.09);
-    add(mirror.mat || 'paint', arm.translate(s * (x + 0.07 + dx / 2), y - 0.04, -u));
+    add(mirror.mat || 'paint', shell.translate(s * (x + out), y, -u));
+    add('dark', new THREE.CircleGeometry(0.088, 14).scale(1.05, 0.58, 1).translate(s * (x + out), y, -u + 0.052));
+    const arm = new THREE.BoxGeometry(out - 0.01, 0.05, 0.09);
+    add(mirror.armMat || mirror.mat || 'paint', arm.translate(s * (x + out / 2 - 0.015), y - 0.04, -u));
   }
 
   // Brake discs and calipers behind the spokes (they don't turn with the wheel).
@@ -1480,7 +1638,7 @@ export function makeCar(id, color) {
   });
   const tail = new THREE.MeshStandardMaterial({ color: 0x6a0a0a, emissive: 0xff1a1a, emissiveIntensity: 0.6, roughness: 0.2 });
   const mats = {
-    paint, tail, head: headMat, dark: darkMat, chrome: chromeMat, glass: glassMat, lens: lensMat,
+    paint, tail, head: headMat, amber: amberMat, dark: darkMat, chrome: chromeMat, glass: glassMat, lens: lensMat,
     grille: grilleMat, plate: plateMat, badge: badgeMat, disc: discMat, caliper: caliperMat,
   };
 
@@ -1524,10 +1682,10 @@ export function makeCar(id, color) {
 export const LOD_FAR = 60; // m: switch to the far version beyond this...
 export const LOD_NEAR = 50; // ...and back to full detail within this (no flicker in between)
 
-const PALETTE = ['dark', 'disc', 'caliper', 'tire', 'head', 'grille', 'plate', 'chrome', 'lens', 'badge'];
+const PALETTE = ['dark', 'disc', 'caliper', 'tire', 'head', 'grille', 'plate', 'chrome', 'lens', 'badge', 'amber'];
 const paletteSource = () => ({
   dark: darkMat, disc: discMat, caliper: caliperMat, tire: tireMat, head: headMat, grille: grilleMat, plate: plateMat,
-  chrome: chromeMat, lens: lensMat, badge: badgeMat,
+  chrome: chromeMat, lens: lensMat, badge: badgeMat, amber: amberMat,
 });
 let palette = null;
 function paletteMaterials() {
@@ -1628,12 +1786,12 @@ function trafficGeos(id) {
     shiny: merge(['chrome', 'lens', 'badge'].map((k) => pal(k, parts[k]))),
     plain: merge([
       pal('dark', parts.dark), ...wheelDark, pal('disc', parts.disc), pal('caliper', parts.caliper), pal('head', parts.head),
-      ...wheels.map((w) => pal('tire', at(W.tire, w))),
+      ...wheels.map((w) => pal('tire', at(W.tire, w))), pal('amber', parts.amber),
     ]),
     farPlain: merge([
       pal('dark', parts.dark), ...wheelDark, pal('head', parts.head),
       pal('grille', parts.grille, averageColor(grilleTex)), pal('plate', parts.plate, averageColor(plateTex)),
-      ...wheels.map((w) => pal('tire', at(W.farTire, w))),
+      ...wheels.map((w) => pal('tire', at(W.farTire, w))), pal('amber', parts.amber),
     ]),
     // Both rims of an axle, around the axle's centre (they spin together).
     axles: d.axles.map((axle) => ({

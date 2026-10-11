@@ -22,6 +22,15 @@ const ellipse = (cx, cy, rx, ry, n = 16) =>
 // Honda's "H", centred on (cx, cy).
 const hondaH = (cx, cy, s = 1) => [[-5, -4], [-3, -4], [-3, -0.6], [3, -0.6], [3, -4], [5, -4], [5, 4], [3, 4], [3, 0.6], [-3, 0.6], [-3, 4], [-5, 4]]
   .map(([x, y]) => [cx + x * 0.011 * s, cy + y * 0.011 * s]);
+// The Honda emblem w metres wide at height y: a chrome H on black inside a chrome frame that is
+// wider at the top. `put` is a centred decal function (c.frontMid or c.rearMid).
+const hondaBadge = (put, y, w, off = 0.016) => {
+  const h = w * 0.78;
+  const frame = (i) => [[-w / 2 + i, y + h / 2 - i], [w / 2 - i, y + h / 2 - i], [w * 0.42 - i, y - h / 2 + i], [-w * 0.42 + i, y - h / 2 + i]];
+  put('chrome', frame(0), off);
+  put('dark', frame(w * 0.07), off + 0.003);
+  put('chrome', hondaH(0, y, (w * 0.56) / 0.11), off + 0.006);
+};
 
 export const CAR_MODELS = {
   modelx: {
@@ -56,65 +65,123 @@ export const CAR_MODELS = {
     },
   },
   crv: {
+    // 2026 CR-V (6th generation, same body since 2023), Touring Hybrid / Sport Touring look.
+    // Honda Canada spec sheet: 4695 long, 1867 wide (73.5 in, mirrors excluded), 1690 tall,
+    // 2700 wheelbase, 235/55 R19. Shape measured from honda.ca's 360-degree photos.
     brand: 'Honda', name: 'CR-V', color: 0x2e4a6b, desc: 'Comfy, sensible, secretly quick',
-    len: 4.7, width: 1.86, wheelR: 0.37, tireW: 0.235, axles: [1.3, -1.4], round: 0.15, cladding: true, fin: -1.85,
-    section: { shoulder: 0.6, belt: 0.05, tuck: 0.05, crease: 1.5, crown: 0.03, flare: 0.014, gap: 0.065 },
-    side: [[2.35, 0.42, 0.8], [2.2, 0.32, 0.98], [1.8, 0.32, 1.06], [1.15, 0.32, 1.12], [0, 0.33, 1.13], [-1.4, 0.33, 1.18], [-2.15, 0.35, 1.2], [-2.3, 0.4, 1.15], [-2.35, 0.48, 1.04]],
-    plan: [[2.35, 0.74], [2.2, 0.88], [1.8, 0.93], [-2.0, 0.93], [-2.3, 0.88], [-2.35, 0.8]],
-    cabin: [[1.15, 1.14, 0.78], [0.5, 1.62, 0.74], [0.3, 1.68, 0.74], [-1.5, 1.68, 0.74], [-2.05, 1.63, 0.75], [-2.3, 1.2, 0.8]],
-    // Black A/B/C pillars, the window line kicks up into a body-coloured D pillar.
-    windows: { belt: 0.05, top: 0.08, bands: [{ u0: 1.0, u1: -2.06, k0: 0.78, k1: 1.7 }], pillars: [-0.4, -1.5], kick: [[-1.5, 0], [-2.06, 0.08]] },
-    windshield: [1.1, 0.52], backlight: [-2.07, -2.27],
-    rim: { n: 5, style: 'twin', color: 0x8d9299 },
-    doors: [1.0, -0.4, -1.5], handles: [-0.26, -1.36],
+    len: 4.695, width: 1.867, wheelR: 0.365, tireW: 0.235, axles: [1.35, -1.35], round: 0.15, cladding: true, fin: -1.6,
+    nose: 0.07, tail: 0.06, wrap: 0.55, sag: 0.008, mirror: { mat: 'dark', dx: 0.05, dy: -0.045 },
+    section: { shoulder: 0.45, belt: 0.04, tuck: 0.03, crease: 1.5, crown: 0.025, flare: 0.012, gap: 0.085 },
+    side: [
+      [2.3475, 0.36, 0.6], [2.32, 0.33, 0.9], [2.25, 0.29, 0.955], [2.15, 0.28, 1.012], [2.0, 0.277, 1.055], [1.8, 0.27, 1.086],
+      [1.5, 0.26, 1.127], [1.2, 0.25, 1.15], [1.05, 0.25, 1.15], [0.84, 0.248, 1.12], [0.4, 0.246, 1.145], [-0.66, 0.246, 1.19],
+      [-1.3, 0.26, 1.23], [-1.67, 0.29, 1.265], [-2.0, 0.316, 1.2], [-2.2, 0.36, 1.15], [-2.3, 0.4, 1.13], [-2.3475, 0.5, 1.0],
+    ],
+    // Plan from a visual hull of the 36 photos: the nose and tail round off strongly.
+    plan: [
+      [2.3475, 0.34], [2.3, 0.47], [2.25, 0.59], [2.2, 0.66], [2.15, 0.715], [2.1, 0.77], [2.05, 0.82], [2.0, 0.855], [1.9, 0.89],
+      [1.8, 0.915], [1.65, 0.93], [1.5, 0.9335], [-1.5, 0.9335], [-1.65, 0.925], [-1.8, 0.905], [-1.9, 0.88], [-2.0, 0.855],
+      [-2.1, 0.82], [-2.2, 0.775], [-2.25, 0.725], [-2.3, 0.62], [-2.3475, 0.4],
+    ],
+    cabin: [
+      [1.07, 1.16, 0.72], [0.9, 1.27, 0.7], [0.7, 1.39, 0.67], [0.5, 1.5, 0.635], [0.4, 1.545, 0.62], [0.3, 1.58, 0.605], [0.2, 1.61, 0.595],
+      [0.0, 1.645, 0.585], [-0.4, 1.66, 0.585], [-0.9, 1.66, 0.585], [-1.3, 1.65, 0.585], [-1.6, 1.64, 0.59], [-1.95, 1.62, 0.6],
+      [-1.98, 1.575, 0.605], [-2.03, 1.485, 0.62], [-2.13, 1.375, 0.65], [-2.23, 1.27, 0.69], [-2.29, 1.19, 0.72],
+    ],
+    // Chrome-trimmed glass, black B and C pillars; the window line rises gently to a point at the body-coloured D pillar.
+    windows: { belt: 0.025, top: 0.1, trim: true, bands: [{ u0: 0.84, u1: -1.67, k0: 0.72, k1: 1.3 }], pillars: [-0.29, -1.15] },
+    windshield: [1.04, 0.22], backlight: [-2.03, -2.26],
+    rim: { n: 5, style: 'twin', color: 0x141517, size: 0.68 },
+    doors: [0.88, -0.24, -1.31], handles: [-0.07, -1.09],
     stats: { top: 0.92, accel: 0.95, grip: 1.0 },
     details(c) {
-      // Tall, upright black grille, slim headlights across the top of it.
-      c.frontMid('grille', [[-0.5, 0.62], [0.5, 0.62], [0.56, 0.68], [0.56, 0.92], [0.5, 0.97], [-0.5, 0.97], [-0.56, 0.92], [-0.56, 0.68]]);
-      c.frontMid('chrome', hondaH(0, 0.86, 1.1), 0.022);
-      c.front('lens', [[0.57, 0.86], [0.86, 0.9], [0.9, 0.85], [0.87, 0.8], [0.58, 0.78]]);
-      c.front('head', [[0.58, 0.875], [0.86, 0.9], [0.87, 0.88], [0.59, 0.858]], 0.018);
-      c.frontMid('grille', [[-0.56, 0.38], [0.56, 0.38], [0.6, 0.52], [-0.6, 0.52]]);
-      c.frontMid('chrome', [[-0.38, 0.34], [0.38, 0.34], [0.42, 0.37], [-0.42, 0.37]], 0.016);
-      c.front('dark', [[0.66, 0.42], [0.78, 0.44], [0.8, 0.62], [0.7, 0.6]]);
-      // Tall tail lights up the tailgate edges, with a short arm into the tailgate.
-      c.rear('tail', [[0.7, 0.92], [0.86, 0.94], [0.85, 1.16], [0.77, 1.42], [0.72, 1.42], [0.72, 1.16]]);
-      c.rear('tail', [[0.46, 1.0], [0.72, 1.0], [0.72, 1.07], [0.46, 1.07]]);
-      c.rearMid('dark', [[-0.82, 0.44], [0.82, 0.44], [0.84, 0.56], [-0.84, 0.56]]);
-      c.rearMid('chrome', hondaH(0, 1.06), 0.016);
-      c.plate(0.78);
-      for (const s of [-1, 1]) c.box('dark', s * 0.64, 1.7, 0.75, 0.05, 0.05, 2.2);
-      c.box('paint', 0, 1.64, 2.08, 1.3, 0.05, 0.2);
+      // Big hexagonal grille under the straight hood edge, the Honda emblem high up in it.
+      c.frontMid('dark', [[-0.47, 0.905], [0.47, 0.905], [0.555, 0.765], [0.45, 0.575], [-0.45, 0.575], [-0.555, 0.765]], 0.01);
+      c.frontMid('grille', [[-0.45, 0.89], [0.45, 0.89], [0.53, 0.765], [0.43, 0.592], [-0.43, 0.592], [-0.53, 0.765]], 0.014);
+      hondaBadge(c.frontMid, 0.79, 0.16, 0.018);
+      // Slim headlights along the hood edge, from the grille corners round onto the fenders; LED strip on top.
+      c.front('lens', [[0.46, 0.905], [0.78, 0.98], [0.865, 0.975], [0.87, 0.93], [0.82, 0.905], [0.53, 0.8], [0.47, 0.875]]);
+      c.front('chrome', [[0.5, 0.882], [0.78, 0.953], [0.855, 0.95], [0.85, 0.928], [0.78, 0.93], [0.52, 0.857]], 0.015);
+      c.front('head', [[0.47, 0.906], [0.78, 0.984], [0.865, 0.979], [0.865, 0.966], [0.78, 0.97], [0.48, 0.892]], 0.018);
+      // Black lower bumper: honeycomb intake between silver corner frames, vents at the corners, silver skid strip.
+      c.front('dark', [[0, 0.505], [0.42, 0.505], [0.7, 0.525], [0.73, 0.585], [0.79, 0.575], [0.82, 0.45], [0.83, 0.31], [0, 0.31]], 0.01);
+      c.frontMid('grille', [[-0.42, 0.5], [0.42, 0.5], [0.44, 0.34], [-0.44, 0.34]], 0.014);
+      c.front('chrome', [[0.415, 0.49], [0.575, 0.49], [0.625, 0.42], [0.59, 0.325], [0.45, 0.325], [0.405, 0.42]], 0.016);
+      c.front('dark', [[0.44, 0.47], [0.56, 0.47], [0.6, 0.42], [0.57, 0.345], [0.465, 0.345], [0.43, 0.42]], 0.019);
+      c.frontMid('chrome', rect(-0.6, 0.315, 0.6, 0.33), 0.016);
+      // Tall thin tail lights up the D pillars, turning in along the tailgate below the glass.
+      c.rear('tail', [[0.575, 1.47], [0.61, 1.47], [0.81, 1.13], [0.75, 1.12]]);
+      c.rear('tail', [[0.37, 1.055], [0.82, 1.03], [0.872, 1.04], [0.872, 1.1], [0.81, 1.13], [0.66, 1.11], [0.37, 1.1]]);
+      hondaBadge(c.rearMid, 1.15, 0.1);
+      c.plate(0.975);
+      // Black lower bumper with red reflectors and twin silver exhaust finishers.
+      c.rear('dark', [[0, 0.66], [0.7, 0.66], [0.79, 0.6], [0.83, 0.5], [0.835, 0.47], [0, 0.47]], 0.01);
+      c.rear('tail', rect(0.46, 0.57, 0.66, 0.59), 0.014);
+      c.rear('chrome', [[0.47, 0.45], [0.7, 0.45], [0.685, 0.385], [0.485, 0.385]], 0.014);
+      c.rear('dark', [[0.49, 0.44], [0.68, 0.44], [0.668, 0.395], [0.502, 0.395]], 0.017);
+      // Low black roof rails and the roof spoiler over the tailgate glass.
+      for (const s of [-1, 1]) {
+        for (const [u0, u1, y] of [[0.15, -0.4, 1.655], [-0.4, -1.2, 1.668], [-1.2, -1.78, 1.655]]) c.box('dark', s * 0.5, y, -(u0 + u1) / 2, 0.04, 0.026, u0 - u1);
+      }
+      c.box('paint', 0, 1.58, 1.98, 1.12, 0.04, 0.16);
     },
   },
   accord: {
+    // 2026 Accord (11th generation, same body since 2023), Touring Hybrid look.
+    // Honda Canada spec sheet: 4971 long, 1862 wide, 1449 tall, 2830 wheelbase, 235/40 R19.
+    // Shape measured from honda.ca's 360-degree photos.
     brand: 'Honda', name: 'Accord', color: 0x8f1d21, desc: 'Smooth fastback, quietly quick',
-    len: 4.97, width: 1.86, wheelR: 0.34, tireW: 0.235, axles: [1.45, -1.38], round: 0.25, fin: -1.05,
-    section: { shoulder: 0.68, belt: 0.06, tuck: 0.075, crease: 1.25, crown: 0.03, gap: 0.045 },
-    side: [[2.48, 0.32, 0.62], [2.3, 0.2, 0.78], [1.7, 0.2, 0.86], [1.0, 0.2, 0.9], [-0.5, 0.2, 0.93], [-1.8, 0.22, 0.98], [-2.35, 0.25, 0.98], [-2.48, 0.32, 0.86]],
-    plan: [[2.48, 0.74], [2.3, 0.88], [1.8, 0.93], [-1.9, 0.93], [-2.35, 0.88], [-2.48, 0.8]],
-    cabin: [[1.0, 0.91, 0.76], [0.25, 1.4, 0.68], [-0.6, 1.44, 0.68], [-1.35, 1.3, 0.7], [-2.05, 0.99, 0.82]],
-    // Long six-window glass house with chrome trim, quarter glass in the fastback C pillar.
-    windows: { belt: 0.04, top: 0.06, trim: true, bands: [{ u0: 0.86, u1: -1.8, k0: 0.62, k1: 0.5 }], pillars: [-0.32, -1.32] },
-    windshield: [0.97, 0.28], backlight: [-1.3, -2.0],
-    rim: { n: 10, style: 'multi', color: 0x45494f },
-    doors: [0.86, -0.32, -1.38], handles: [-0.2, -1.26],
+    len: 4.971, width: 1.862, wheelR: 0.335, tireW: 0.235, axles: [1.47, -1.36], round: 0.16, fin: -1.1,
+    nose: 0.09, tail: 0.09, wrap: 0.62, sag: 0.008, mirror: { dx: 0.08, dy: -0.05 },
+    section: { shoulder: 0.62, belt: 0.06, tuck: 0.07, crease: 1.25, crown: 0.03, gap: 0.055 },
+    side: [
+      [2.4855, 0.3, 0.62], [2.44, 0.275, 0.72], [2.4, 0.268, 0.768], [2.3, 0.25, 0.814], [2.2, 0.235, 0.851], [2.0, 0.215, 0.899],
+      [1.8, 0.2, 0.931], [1.5, 0.19, 0.966], [1.2, 0.19, 0.989], [1.07, 0.19, 0.993], [0.83, 0.19, 0.968], [0.0, 0.19, 1.01],
+      [-0.8, 0.19, 1.025], [-1.3, 0.2, 1.028], [-1.55, 0.21, 1.075], [-1.8, 0.23, 1.085], [-1.98, 0.25, 1.085],
+      [-2.1, 0.27, 1.067], [-2.2, 0.28, 1.048], [-2.3, 0.3, 1.03], [-2.4, 0.33, 1.021], [-2.4855, 0.38, 0.8],
+    ],
+    // Plan from a visual hull of the 36 photos.
+    plan: [
+      [2.4855, 0.36], [2.45, 0.4], [2.4, 0.52], [2.35, 0.6], [2.3, 0.665], [2.2, 0.77], [2.1, 0.83], [2.0, 0.865], [1.9, 0.895],
+      [1.8, 0.92], [1.6, 0.931], [-1.6, 0.931], [-1.8, 0.905], [-2.0, 0.875], [-2.1, 0.84], [-2.2, 0.81], [-2.3, 0.77], [-2.35, 0.72],
+      [-2.4, 0.66], [-2.4855, 0.5],
+    ],
+    cabin: [
+      [1.07, 1.0, 0.74], [0.9, 1.06, 0.72], [0.7, 1.18, 0.68], [0.5, 1.31, 0.645], [0.3, 1.384, 0.615], [0.1, 1.425, 0.595],
+      [-0.3, 1.449, 0.585], [-0.7, 1.433, 0.59], [-1.0, 1.398, 0.6], [-1.2, 1.361, 0.615], [-1.4, 1.301, 0.64], [-1.6, 1.232, 0.67],
+      [-1.8, 1.159, 0.72], [-1.98, 1.09, 0.78],
+    ],
+    // Long glass house with chrome trim; small quarter glass ending in a point in the fastback C pillar.
+    windows: { belt: 0.0, top: 0.11, trim: true, bands: [{ u0: 0.83, u1: -1.54, k0: 0.8, k1: 0.33 }], pillars: [-0.18, -0.28, -1.1], kick: [[-1.3, 0], [-1.54, 0.03]] },
+    windshield: [1.04, 0.28], backlight: [-0.95, -1.95],
+    rim: { n: 10, style: 'split', split: 0.1, spoke: 0.02, color: 0xc2c6cc, size: 0.745, lip: 'dark' },
+    doors: [0.98, -0.19, -1.25], handles: [-0.01, -1.0],
     stats: { top: 1.0, accel: 1.0, grip: 1.1 },
     details(c) {
-      // Wide black grille, gloss-black bar joining slim swept headlights.
-      c.frontMid('grille', [[-0.42, 0.36], [0.42, 0.36], [0.56, 0.5], [0.5, 0.64], [-0.5, 0.64], [-0.56, 0.5]]);
-      c.frontMid('dark', [[-0.52, 0.655], [0.52, 0.655], [0.52, 0.69], [-0.52, 0.69]], 0.016);
-      c.frontMid('chrome', hondaH(0, 0.56), 0.02);
-      c.front('lens', [[0.5, 0.65], [0.84, 0.71], [0.9, 0.67], [0.86, 0.61], [0.54, 0.61]]);
-      c.front('head', [[0.53, 0.643], [0.83, 0.697], [0.845, 0.686], [0.54, 0.632]], 0.018);
-      c.front('dark', [[0.62, 0.28], [0.82, 0.3], [0.84, 0.46], [0.7, 0.44]]);
-      // Slim tail lights joined by a thin red bar across the trunk lid.
-      c.rear('tail', [[0.3, 0.885], [0.86, 0.9], [0.9, 0.84], [0.84, 0.82], [0.32, 0.845]]);
-      c.rearMid('tail', rect(-0.31, 0.855, 0.31, 0.872));
-      c.rearMid('dark', [[-0.72, 0.28], [0.72, 0.28], [0.68, 0.4], [-0.68, 0.4]]);
-      c.rearMid('chrome', hondaH(0, 0.78), 0.016);
-      c.plate(0.6);
-      c.box('paint', 0, 0.99, 2.36, 1.1, 0.02, 0.06);
+      // Wide hexagonal grille with chrome-edged points at the sides, big Honda emblem.
+      c.frontMid('grille', [[-0.375, 0.765], [0.375, 0.765], [0.5, 0.637], [0.406, 0.544], [-0.406, 0.544], [-0.5, 0.637]], 0.014);
+      c.front('chrome', [[0.375, 0.774], [0.395, 0.774], [0.52, 0.637], [0.418, 0.536], [0.398, 0.536], [0.5, 0.637]], 0.016);
+      hondaBadge(c.frontMid, 0.672, 0.14, 0.018);
+      // Slim headlights from the grille corners round onto the fenders, LED strip along the top.
+      c.front('lens', [[0.44, 0.768], [0.86, 0.81], [0.875, 0.8], [0.878, 0.76], [0.865, 0.722], [0.51, 0.683], [0.47, 0.72]]);
+      c.front('chrome', [[0.49, 0.75], [0.85, 0.789], [0.864, 0.772], [0.85, 0.757], [0.5, 0.724]], 0.015);
+      c.front('head', [[0.45, 0.772], [0.86, 0.813], [0.874, 0.805], [0.874, 0.792], [0.86, 0.799], [0.455, 0.757]], 0.018);
+      // Black lower grille across the bumper, chrome C-shaped trims round the corner vents.
+      c.frontMid('dark', [[-0.7, 0.435], [0.7, 0.435], [0.73, 0.295], [-0.73, 0.295]], 0.01);
+      c.frontMid('grille', [[-0.6, 0.415], [0.6, 0.415], [0.62, 0.31], [-0.62, 0.31]], 0.014);
+      c.front('chrome', [[0.635, 0.448], [0.77, 0.448], [0.782, 0.432], [0.74, 0.3], [0.655, 0.3], [0.655, 0.318], [0.72, 0.318], [0.755, 0.432], [0.635, 0.432]], 0.016);
+      // Smoked band across the trunk lid joining the slim tail lights, a thin red light line inside it.
+      c.rearMid('dark', rect(-0.64, 0.871, 0.64, 0.954), 0.01);
+      c.rearMid('tail', rect(-0.62, 0.928, 0.62, 0.94), 0.013);
+      c.rear('tail', [[0.6, 0.955], [0.8, 0.955], [0.85, 0.93], [0.85, 0.82], [0.7, 0.807], [0.635, 0.807], [0.44, 0.895], [0.6, 0.9]], 0.016);
+      c.rear('lens', [[0.64, 0.905], [0.835, 0.905], [0.835, 0.827], [0.7, 0.817], [0.645, 0.817], [0.5, 0.89]], 0.019);
+      c.rear('tail', rect(0.66, 0.856, 0.83, 0.865), 0.022);
+      hondaBadge(c.rearMid, 0.914, 0.075, 0.019);
+      c.plate(0.76);
+      // Black diffuser with a chrome strip, red reflectors low on the bumper.
+      c.rearMid('dark', [[-0.82, 0.41], [0.82, 0.41], [0.8, 0.35], [-0.8, 0.35]], 0.01);
+      c.rearMid('chrome', rect(-0.43, 0.375, 0.43, 0.39), 0.014);
+      c.rear('tail', rect(0.66, 0.55, 0.78, 0.565), 0.014);
     },
   },
   is300: {
@@ -1025,7 +1092,7 @@ function buildParts(d, fn) {
   };
 
   const nrm = new THREE.Vector3();
-  const WRAP_DEPTH = 0.32;
+  const WRAP_DEPTH = d.wrap ?? 0.32; // how far back from the bumper tips decals may wrap (m)
   const decal = (mat, pts, front, off, mirror) => {
     const cache = new Map();
     const map = (x, y) => {
@@ -1040,7 +1107,7 @@ function buildParts(d, fn) {
       }
       return cache.get(key);
     };
-    const SAG = 0.004; // metres a decal edge may stray from the body before it's split
+    const SAG = d.sag ?? 0.004; // metres a decal edge may stray from the body before it's split (keep below the decals' offsets)
     for (const s of mirror ? [1, -1] : [1]) {
       const contour = pts.map(([x, y]) => new THREE.Vector2(x * s, y));
       const faces = THREE.ShapeUtils.triangulateShape(contour, []);
@@ -1168,20 +1235,23 @@ function buildParts(d, fn) {
   }
 
   // Mirrors: a rounded shell on a short arm at the bottom corner of the side glass.
+  // Optional per model, d.mirror: { mat (shell material, default paint), dx / dy (move it out / up, m) }.
+  const M = d.mirror || {};
   for (const s of [-1, 1]) {
     const u = fn.cFront - 0.3;
     const yBase = fn.top(u) + 0.02;
     const x = fn.ghX(u, yBase + 0.05);
-    const y = yBase + 0.1;
+    const y = yBase + 0.1 + (M.dy || 0);
+    const dx = M.dx || 0;
     const shell = new THREE.SphereGeometry(0.1, 14, 10).scale(1.05, 0.62, 0.55);
-    add('paint', shell.translate(s * (x + 0.17), y, -u));
-    add('dark', new THREE.CircleGeometry(0.088, 14).scale(1.05, 0.58, 1).translate(s * (x + 0.17), y, -u + 0.052));
-    const arm = new THREE.BoxGeometry(0.16, 0.05, 0.09);
-    add('paint', arm.translate(s * (x + 0.07), y - 0.04, -u));
+    add(M.mat || 'paint', shell.translate(s * (x + 0.17 + dx), y, -u));
+    add('dark', new THREE.CircleGeometry(0.088, 14).scale(1.05, 0.58, 1).translate(s * (x + 0.17 + dx), y, -u + 0.052));
+    const arm = new THREE.BoxGeometry(0.16 + dx, 0.05, 0.09);
+    add(M.mat || 'paint', arm.translate(s * (x + 0.07 + dx / 2), y - 0.04, -u));
   }
 
   // Brake discs and calipers behind the spokes (they don't turn with the wheel).
-  const rimR = d.wheelR * 0.7;
+  const rimR = d.wheelR * (d.rim?.size ?? 0.7);
   for (const axle of d.axles) {
     for (const s of [-1, 1]) {
       const cx = s * (fn.wheelX(axle) + fn.tireW / 2 - 0.085);
@@ -1201,8 +1271,10 @@ function buildParts(d, fn) {
 function buildWheel(d, fn) {
   const r = d.wheelR;
   const tw = fn.tireW;
-  const rimR = r * 0.7;
   const rim = d.rim || { n: 5, style: 'twin', color: 0x9da3ab };
+  // Optional: rim.size (rim radius as a share of the wheel radius), rim.lip ('dark' for a black lip),
+  // rim.split / rim.spoke (half-angle and width of the 'split' style's spoke pairs).
+  const rimR = r * (rim.size ?? 0.7);
   const groove = (y) => [[r, y - 0.009], [r - 0.012, y - 0.006], [r - 0.012, y + 0.006], [r, y + 0.009]];
   const profile = [
     [rimR - 0.005, -tw / 2 + 0.02], [rimR + 0.015, -tw / 2], [r - 0.05, -tw / 2 - 0.008], [r - 0.014, -tw / 2 + 0.01],
@@ -1218,7 +1290,7 @@ function buildWheel(d, fn) {
     const outer = s * (tw / 2 - 0.012); // rim lip plane
     const hubX = s * (tw / 2 - 0.055); // hub is set back: the rim is dished
     dark.push(new THREE.CylinderGeometry(rimR, rimR, 0.01, 28).rotateZ(Math.PI / 2).translate(s * (tw / 2 - 0.13), 0, 0));
-    face.push(new THREE.TorusGeometry(rimR - 0.008, 0.014, 4, 26).rotateY(Math.PI / 2).translate(outer, 0, 0));
+    (rim.lip === 'dark' ? dark : face).push(new THREE.TorusGeometry(rimR - 0.008, 0.014, 4, 26).rotateY(Math.PI / 2).translate(outer, 0, 0));
     face.push(new THREE.CylinderGeometry(0.068, 0.072, 0.03, 18).rotateZ(Math.PI / 2).translate(hubX, 0, 0));
     dark.push(new THREE.CylinderGeometry(0.034, 0.034, 0.032, 14).rotateZ(Math.PI / 2).translate(hubX + s * 0.004, 0, 0));
     for (let k = 0; k < 5; k++) {
@@ -1237,7 +1309,7 @@ function buildWheel(d, fn) {
     };
     for (let k = 0; k < rim.n; k++) {
       const a = (k / rim.n) * Math.PI * 2;
-      if (rim.style === 'split') { spoke(a - 0.075, 0.032); spoke(a + 0.075, 0.032); }
+      if (rim.style === 'split') { spoke(a - (rim.split ?? 0.075), rim.spoke ?? 0.032); spoke(a + (rim.split ?? 0.075), rim.spoke ?? 0.032); }
       else if (rim.style === 'twin') { spoke(a - 0.13, 0.042); spoke(a + 0.13, 0.042); }
       else if (rim.style === 'aero') spoke(a, r * 0.36, 0.02);
       else spoke(a, 0.034);

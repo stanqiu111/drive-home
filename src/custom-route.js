@@ -221,6 +221,7 @@ function wireField(which) {
     state[which] = p;
     input.value = p.detail && p.detail !== 'Map point' ? `${p.label}, ${p.detail}` : p.label;
     close();
+    if (which === 'from' && !state.to) setTimeout(() => $('cr-to').focus(), 0); // straight on to the finish
     planRoute();
   };
   const search = async (fallback) => {

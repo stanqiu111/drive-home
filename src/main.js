@@ -14,6 +14,7 @@ import { Ending } from './ending.js';
 import { buildFun, FUN_RIDES, FUN_IDS } from './funrides.js';
 import { readInput, setupTouch, isTouch } from './input.js';
 import { sound, SOUND_CREDITS } from './sound.js';
+import { openCustomBuilder, customBuilderOpen, listCustomRoutes, loadCustomRoute, deleteCustomRoute, isCustomId } from './custom-route.js';
 
 // Game-side flavour per map. Names, distances and route facts come from maps/index.json,
 // which tools/build-maps.mjs writes.
@@ -58,6 +59,12 @@ const GROUPS = [
 ];
 const mapIndex = await (await fetch('maps/index.json')).json();
 const MAPS = mapIndex.map((meta) => ({ to: '', desc: '', cheer: 'MADE IT!!', ending: 'bbq', ...meta, ...MAP_INFO[meta.id] }));
+// Custom routes the player built (saved on this device, see custom-route.js).
+const customEntry = (meta) => ({
+  cheer: 'MADE IT!!', ending: 'bbq', ...meta,
+  desc: `Your own route, ${meta.km} km from ${meta.from} to ${meta.to}: the real streets, buildings and hills, built ${new Date(meta.created).toLocaleDateString()} from OpenStreetMap and City of Edmonton data.`,
+});
+for (const meta of await listCustomRoutes()) MAPS.push(customEntry(meta));
 
 const BASE_SPEED = 45; // m/s ≈ 162 km/h before car stats
 const NITRO_BONUS = 21; // m/s on top of the car's top speed
@@ -265,7 +272,7 @@ async function selectMap(id) {
   ui.loading.classList.add('show');
   let next = null;
   try {
-    const data = await loadMapData(id);
+    const data = isCustomId(id) ? await loadCustomRoute(id) : await loadMapData(id);
     if (stale()) return;
     const sl = slicer(8, stale);
     next = await buildWorld(data, { maxAnisotropy, sl });
@@ -303,7 +310,7 @@ async function selectMap(id) {
   ui.loading.classList.remove('show');
   if (!prefetched) {
     prefetched = true;
-    setTimeout(() => prefetchMaps(MAPS.map((m) => m.id)), 1500);
+    setTimeout(() => prefetchMaps(MAPS.filter((m) => !m.custom).map((m) => m.id)), 1500);
   }
 }
 let prefetched = false;
@@ -363,8 +370,9 @@ function stars(m) {
 }
 function badges(m) {
   const out = [];
+  if (m.custom) out.push('Yours');
   if (NEW_MAPS.has(m.id)) out.push('New');
-  if (m.km === Math.max(...MAPS.map((x) => x.km))) out.push('Longest');
+  if (!m.custom && m.km === Math.max(...MAPS.filter((x) => !x.custom).map((x) => x.km))) out.push('Longest');
   if (m.highwayM / (m.km * 1000) >= 0.5) out.push('Highway');
   if (m.bridgeM >= 100 || m.climb >= 50) out.push('Scenic');
   if (m.km <= 2) out.push('Short');
@@ -441,7 +449,7 @@ function mapCard(m) {
     ledger = `Best ${fmt(best)}${rank ? ` · #${rank} online` : ''}`;
   } else ledger = `Rush hour ≈ ${rushMin(m)} min · beat it`;
   return `<button class="tile route ${sel ? 'sel' : ''}" data-map="${m.id}" aria-pressed="${sel}">
-    <div class="rmap-wrap">${routeSvg(m, false)}<div class="badges">${badges(m).map((b) => `<span class="badge ${b === 'New' ? 'new' : ''}">${b}</span>`).join('')}</div></div>
+    <div class="rmap-wrap">${routeSvg(m, false)}<div class="badges">${badges(m).map((b) => `<span class="badge ${b === 'New' ? 'new' : b === 'Yours' ? 'yours' : ''}">${b}</span>`).join('')}</div></div>
     <b>${esc2(m.name)}</b>
     <span class="fromto">${esc2(m.from)} → ${esc2(m.to || m.name)}</span>
     <span class="rstats">${m.km} km · <i class="stars" title="${st} of 5">${'★'.repeat(st)}${'☆'.repeat(5 - st)}</i> · ${m.signals} lights</span>
@@ -470,19 +478,27 @@ function mapDetail(m) {
     </div>
     ${!best ? `<p class="hint">Not driven yet. Real traffic takes about ${rushMin(m)} minutes.</p>` : ''}
     ${m.landmarks?.length ? `<p class="hint">Passes: ${m.landmarks.map((l) => esc2(l.name)).join(' · ')}</p>` : ''}
+    ${m.custom ? `<button class="link-btn del-route" data-del-route="${m.id}" type="button">Delete this route</button>` : ''}
   </div>`;
 }
 
 function renderMenu() {
   const currentMap = MAPS.find((m) => m.id === prefs.map) || MAPS[0];
   ui.mapList.innerHTML = GROUPS.map((g) => {
-    const list = MAPS.filter((m) => (m.from || 'Summerside') === g.from);
+    const list = MAPS.filter((m) => !m.custom && (m.from || 'Summerside') === g.from);
     if (!list.length) return '';
     // The commute first, then the rest by distance.
     list.sort((a, b) => (a.id === 'home' ? -1 : b.id === 'home' ? 1 : a.km - b.km));
     return `<h2 class="group">${g.title} <span>${g.start}</span></h2>
       <div class="tiles routes">${list.map((m) => mapCard(m) + (m.id === currentMap.id ? `<div class="detail inline">${mapDetail(m)}</div>` : '')).join('')}</div>`;
-  }).join('');
+  }).join('') + (() => {
+    // The player's own routes, newest first, then the button that builds a new one.
+    const mine = MAPS.filter((m) => m.custom).sort((a, b) => b.created - a.created);
+    return `<h2 class="group">Your routes <span>anywhere in Edmonton</span></h2>
+      <div class="tiles routes">${mine.map((m) => mapCard(m) + (m.id === currentMap.id ? `<div class="detail inline">${mapDetail(m)}</div>` : '')).join('')}
+        <button class="tile route new-route" data-new-route type="button"><div class="plus" aria-hidden="true">＋</div><b>New route</b>
+          <span class="fromto">Type any start and finish in Edmonton. The game builds the map.</span></button></div>`;
+  })();
   $('route-detail').innerHTML = mapDetail(currentMap);
   const bar = (label, v) => `<div class="stat"><i>${label}</i><div><em style="width:${clamp((v - 0.75) / 0.55, 0.08, 1) * 100}%"></em></div></div>`;
   ui.carList.innerHTML = CAR_IDS.map((id) => {
@@ -558,8 +574,23 @@ progress.onChange((fresh) => {
 });
 
 ui.mapList.addEventListener('click', (e) => {
+  if (e.target.closest('[data-new-route]')) {
+    openCustomBuilder({ onAdded: (meta) => { MAPS.push(customEntry(meta)); selectMap(meta.id); } });
+    return;
+  }
   const id = e.target.closest('[data-map]')?.dataset.map;
   if (id && (id !== prefs.map || !world)) selectMap(id);
+});
+// Deleting a custom route (the link sits in the route's detail panel).
+document.addEventListener('click', async (e) => {
+  const id = e.target.closest?.('[data-del-route]')?.dataset.delRoute;
+  if (!id || S.mode === 'loading') return;
+  const m = MAPS.find((x) => x.id === id);
+  if (!m || !confirm(`Delete your route "${m.name}"? Its best time is deleted too.`)) return;
+  await deleteCustomRoute(id).catch(() => {});
+  MAPS.splice(MAPS.indexOf(m), 1);
+  try { localStorage.removeItem(bestKey(id)); } catch { /* storage unavailable */ }
+  if (prefs.map === id) selectMap('home'); else renderMenu();
 });
 ui.paint.addEventListener('click', (e) => {
   const p = e.target.closest('[data-paint]')?.dataset.paint;
@@ -625,13 +656,14 @@ function finish() {
   S.x = 1000; // out of the traffic's way during the cutscene
   if (player.userData.rider) player.userData.rider.visible = false; // the rider hops off
   setBanner(false); // already driven under it; it would block the ending shot
-  progress.finishTrip(prefs.map);
+  progress.finishTrip(mapInfo().custom ? 'custom' : prefs.map);
   ending.start();
   sound.play('finish');
 }
 
 function showResult() {
   const id = prefs.map;
+  const online = leaderboardEnabled && !mapInfo().custom; // custom routes have no online board
   const best = loadBest(id);
   const isRecord = best === null || S.time < best;
   if (isRecord) {
@@ -644,9 +676,9 @@ function showResult() {
     ${isRecord ? '<p class="record">New best time!</p>' : `<p>Best: ${fmt(best)}</p>`}
     <p>Crashes: ${S.crashes} · Cars smashed: ${S.smashed} · Red lights run: ${S.reds}</p>
     <p>In rush-hour traffic this drive takes about ${realMin} minutes.</p>
-    ${leaderboardEnabled ? boardHTML() : ''}`;
+    ${online ? boardHTML() : mapInfo().custom ? '<p class="hint">Your own route: times stay on this device.</p>' : ''}`;
   ui.finish.classList.add('show');
-  if (leaderboardEnabled) setupBoard(id, S.time, S.crashes);
+  if (online) setupBoard(id, S.time, S.crashes);
 }
 
 // --- Online leaderboard ---
@@ -736,7 +768,7 @@ function setupBoard(map, time, crashes) {
 document.querySelectorAll('.go-btn').forEach((b) => b.addEventListener('click', startRace));
 $('menu-btn').addEventListener('click', showMenu);
 window.addEventListener('keydown', (e) => {
-  if (e.target instanceof HTMLInputElement) return;
+  if (e.target instanceof HTMLInputElement || customBuilderOpen()) return;
   if (e.code === 'Enter' && (S.mode === 'menu' || S.mode === 'finished')) startRace();
   if (e.code === 'Escape' && S.mode === 'finished') showMenu();
   if (e.code === 'KeyM' && !e.repeat) {

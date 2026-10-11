@@ -600,6 +600,18 @@ class RouteIndex {
     });
   }
   key(cx, cz) { return cx * 100003 + cz; }
+  // Sample indices in the grid cells that overlap a box (a superset of the samples in it).
+  inBox(x0, z0, x1, z1) {
+    const c = this.cell;
+    const out = [];
+    for (let i = Math.floor(x0 / c); i <= Math.floor(x1 / c); i++) {
+      for (let j = Math.floor(z0 / c); j <= Math.floor(z1 / c); j++) {
+        const list = this.map.get(this.key(i, j));
+        if (list) out.push(...list);
+      }
+    }
+    return out;
+  }
   nearest(x, z, maxR) {
     const c = this.cell;
     const rr = Math.ceil(maxR / c);
@@ -630,7 +642,7 @@ export function routeFromCoords(coords, proj = GLOBAL_PROJ) {
   pts = resample(pts, STEP);
   return pts;
 }
-export const osrmRouteUrl = (start, dest) => `https://router.project-osrm.org/route/v1/driving/${start.join(',')};${dest.join(',')}?overview=full&geometries=geojson`;
+export { osrmRouteUrl } from './edmonton.js';
 
 
 // ---------- OSM data near the routes ----------
@@ -718,13 +730,14 @@ export async function loadRooflines(pts, getJSON, { proj = GLOBAL_PROJ, parallel
   const queries = rooflineQueries(pts, proj);
   const results = new Array(queries.length);
   let next = 0;
+  let done = 0;
   const worker = async () => {
     while (next < queries.length) {
       const q = next++;
       const rows = [];
       await sodaQuery('https://data.edmonton.ca/resource/jpxi-a9a5.json', 'the_geom,building_height', queries[q], getJSON, (r) => rows.push(...r));
       results[q] = rows;
-      tick(q, queries.length);
+      tick(++done, queries.length);
     }
   };
   await Promise.all(Array.from({ length: Math.min(parallel, queries.length) }, worker));
@@ -1267,6 +1280,16 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
       const along = dx * tx[endI] + dz * tz[endI];
       const lat = dx * -tz[endI] + dz * tx[endI];
       if (along > -25 && along < 14 && lat > endRight - 1 && lat < endRight + 24) return false;
+    }
+    // The road can also cross a big footprint far from all its corners (a custom route that
+    // starts in a mall's parkade): drop it when the road line or either road edge is inside.
+    const xs = ring.map((q) => q[0]);
+    const zs = ring.map((q) => q[1]);
+    for (const i of index.inBox(arrMin(xs), arrMin(zs), arrMax(xs), arrMax(zs))) {
+      const [x, z] = pts[i];
+      if (pointInRing(x, z, ring)
+        || pointInRing(x - tz[i] * right[i], z + tx[i] * right[i], ring)
+        || pointInRing(x - tz[i] * left[i], z + tx[i] * left[i], ring)) return false;
     }
     return true;
   };

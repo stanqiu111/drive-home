@@ -3,7 +3,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Route } from './route.js';
 import { markingPlan, activeSignals } from './lane-layout.js';
 import { overheadClearance } from './clearance.js';
-import { buildLandmarks, landmarkFootprints } from './landmarks.js';
+import { buildLandmarks, landmarkFootprints, projectTo } from './landmarks.js';
 
 const FOG_NEAR = 250;
 export const FOG_FAR = 1800;
@@ -639,7 +639,10 @@ function bridgeRuns(route) {
 const WALK_W = 2.0; // sidewalk width (m)
 const CURB_H = 0.15;
 
-async function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, roads, sl = NO_SLICES) {
+// The Walterdale Bridge (middle of its deck): any route over it gets its white arches.
+const WALTERDALE = [-113.501693, 53.528396];
+
+async function buildRouteRoad(route, heightAt, waterLevel, archAt, asphalt, roads, sl = NO_SLICES) {
   // One set of meshes per ~500 m of road, so stretches out of view are skipped.
   const segSamples = Math.max(1, Math.round(CHUNK / route.step));
   const segs = new Map();
@@ -757,10 +760,14 @@ async function buildRouteRoad(route, heightAt, waterLevel, withArches, asphalt, 
     if (sl.due()) await sl.wait();
   }
 
-  // White tied arches over the longest bridge (the Walterdale Bridge on the downtown route),
-  // with their hangers, as one mesh.
-  if (withArches && runs.length) {
-    const [a, b] = runs.reduce((m, r) => (r[1] - r[0] > m[1] - m[0] ? r : m));
+  // White tied arches over the Walterdale Bridge (the bridge run whose middle is within
+  // 150 m of it), with their hangers, as one mesh.
+  const archRun = runs.find(([ra, rb]) => {
+    const f = route.frame((ra + rb) / 2);
+    return Math.hypot(f.x - archAt[0], f.z - archAt[1]) < 150;
+  });
+  if (archRun) {
+    const [a, b] = archRun;
     const white = new THREE.MeshStandardMaterial({ color: 0xf4f4f0, roughness: 0.4 });
     const parts = [];
     const len = b - a;
@@ -1848,7 +1855,7 @@ export async function buildWorld(data, { maxAnisotropy = 1, sl = NO_SLICES } = {
   };
   add('terrain', ...(await buildTerrain(data.terrain, heights, data.water, sl)));
   await sl.tick();
-  add('road', await buildRouteRoad(route, heightAt, data.water, data.id === 'home', asphalt, data.roads, sl));
+  add('road', await buildRouteRoad(route, heightAt, data.water, projectTo(data.origin, ...WALTERDALE), asphalt, data.roads, sl));
   await sl.tick();
   add('markings', await buildMarkings(route, route.laneData, activeSignals(data.signals, route.length), sl));
   await sl.tick();
@@ -1865,7 +1872,7 @@ export async function buildWorld(data, { maxAnisotropy = 1, sl = NO_SLICES } = {
   await sl.tick();
   add('trees', buildTrees(route, heightAt, occupancy, data.water));
   add('streetLights', buildStreetLights(route));
-  group.add(buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : data.name.toUpperCase()));
+  group.add(buildFinish(route, data.id === 'home' ? 'HOME SWEET HOME' : (data.custom?.to ?? data.name).toUpperCase()));
   occupancy = null;
   roadCells = null;
   await sl.tick();

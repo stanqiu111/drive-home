@@ -652,6 +652,7 @@ const UI_SOUNDS = new Set(['click']);
 // Held horns return { release(t) -> end time }. Bell and clown horns are one-shots.
 const HORNS = {
   modelx: ['car', 430], crv: ['car', 415], accord: ['car', 440], is300: ['car', 470], legacy: ['car', 400], carnival: ['car', 350],
+  revuelto: ['car', 500], ferrari296: ['car', 490], porsche911: ['car', 455], mclaren750s: ['car', 480],
   bike: ['bell'], ebike: ['bell'], poutine: ['clown'], oilers: ['goal', 220], rogers: ['goal', 165], rocket: ['space', 520],
 };
 
@@ -736,6 +737,16 @@ const ENGINES = {
     rec: { pack: 'b4', idle: 720, red: 6400, lp: 6500, body: 2.5, presence: 0, turbo: 0, vol: 1.05 } },
   carnival: { voice: 'ice', idle: 30, red: 128, harm: 1.5, mix: [0.55, 0.25, 0.35], noise: 0.08, bright: 3.5, q: 0.8, drive: 1.2, boxer: 0, dip: 0.8, vol: 0.9,
     rec: { pack: 'i6', idle: 650, red: 6000, lp: 2400, body: 3, presence: -4, turbo: 0, vol: 0.85 } },
+  // Supercars: tuned from the same recordings, revving higher and brighter. A V12 fires like
+  // two straight sixes, a flat-plane V8 like two fours, so those packs stand in for them.
+  revuelto: { voice: 'ice', idle: 40, red: 230, harm: 1.5, mix: [0.6, 0.42, 0.3], noise: 0.12, bright: 7.5, q: 3.2, drive: 3, boxer: 0, dip: 0.4, vol: 1.05,
+    rec: { pack: 'i6', idle: 1000, red: 9500, lp: 9500, body: 1, presence: 3.5, turbo: 0, vol: 1.1 } },
+  ferrari296: { voice: 'ice', idle: 40, red: 215, harm: 1.5, mix: [0.6, 0.4, 0.3], noise: 0.12, bright: 7, q: 3, drive: 2.8, boxer: 0, dip: 0.4, vol: 1,
+    rec: { pack: 'i6', idle: 950, red: 8500, lp: 9000, body: 0.5, presence: 3, turbo: 0.35, vol: 1.05 } },
+  porsche911: { voice: 'ice', idle: 36, red: 185, harm: 2, mix: [0.6, 0.3, 0.42], noise: 0.12, bright: 5.5, q: 2, drive: 2.4, boxer: 0.6, dip: 0.45, vol: 1.05,
+    rec: { pack: 'b4', idle: 900, red: 7200, lp: 7000, body: 2, presence: 1.5, turbo: 0.5, vol: 1.1 } },
+  mclaren750s: { voice: 'ice', idle: 42, red: 210, harm: 2, mix: [0.62, 0.36, 0.28], noise: 0.12, bright: 7, q: 2.6, drive: 2.6, boxer: 0, dip: 0.42, vol: 1,
+    rec: { pack: 'i4', idle: 1000, red: 8500, lp: 9500, body: 0.5, presence: 3, turbo: 0.45, vol: 1.1 } },
   modelx: { voice: 'ev', f0: 70, fk: 24, cut: 2800, buzz: false, vol: 0.9, rec: { bed: 'ev', whine: 0.3, fk: 12 } },
   ebike: { voice: 'ev', f0: 210, fk: 30, cut: 1800, buzz: true, ticks: true, vol: 0.7, rec: { motor: 'ebike', whine: 0 } },
   bike: { voice: 'bike' },

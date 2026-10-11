@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { SUPERCARS } from './supercars.js';
 
 // Cartoon versions of real cars, built from real dimensions.
 //
@@ -297,8 +298,10 @@ export const CAR_MODELS = {
   },
 };
 
+// The supercars (src/supercars/) join the garage; traffic stays the team's own cars.
+Object.assign(CAR_MODELS, SUPERCARS);
 export const CAR_IDS = Object.keys(CAR_MODELS);
-export const TRAFFIC_MIX = CAR_IDS.filter((id) => !CAR_MODELS[id].kind);
+export const TRAFFIC_MIX = CAR_IDS.filter((id) => !CAR_MODELS[id].kind && !CAR_MODELS[id].super);
 export const PAINTS = [0xf2f2f0, 0x1c1c1e, 0x9aa0a6, 0x5d636b, 0x8f1d21, 0xc8102e, 0x3567b5, 0x2e4a6b, 0x3d6b4a, 0xe0b23a];
 export const TRAFFIC_COLORS = PAINTS;
 

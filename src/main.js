@@ -501,14 +501,19 @@ function renderMenu() {
           <span class="fromto">Type any start and finish in Edmonton. The game builds the map.</span></button></div>`;
   })();
   $('route-detail').innerHTML = mapDetail(currentMap);
-  const bar = (label, v) => `<div class="stat"><i>${label}</i><div><em style="width:${clamp((v - 0.75) / 0.55, 0.08, 1) * 100}%"></em></div></div>`;
-  ui.carList.innerHTML = CAR_IDS.map((id) => {
+  // Stat bars run up to the supercars' numbers (about 1.6).
+  const bar = (label, v) => `<div class="stat"><i>${label}</i><div><em style="width:${clamp((v - 0.75) / 0.9, 0.08, 1) * 100}%"></em></div></div>`;
+  const carTile = (id) => {
     const c = CAR_MODELS[id];
-    return `<button class="tile car ${id === prefs.car ? 'sel' : ''}" data-car="${id}">
+    return `<button class="tile car ${c.super ? 'super' : ''} ${id === prefs.car ? 'sel' : ''}" data-car="${id}">
       <small>${c.brand}</small><b>${c.name}</b>
       ${bar('Speed', c.stats.top)}${bar('Accel', c.stats.accel)}${bar('Grip', c.stats.grip)}
       <span>${c.desc}</span></button>`;
-  }).join('') + FUN_IDS.map((id) => {
+  };
+  ui.carList.innerHTML = CAR_IDS.filter((id) => !CAR_MODELS[id].super).map(carTile).join('')
+    + `<h3 class="car-group">Supercars <span>the fastest cars in the garage</span></h3>`
+    + CAR_IDS.filter((id) => CAR_MODELS[id].super).map(carTile).join('')
+    + '<h3 class="car-group">Fun rides</h3>' + FUN_IDS.map((id) => {
     const f = FUN_RIDES[id];
     const locked = !carAvailable(id);
     const desc = f.locked && !locked ? 'Endless nitro, flies above 250 km/h, smashes through traffic' : f.desc;

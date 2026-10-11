@@ -365,3 +365,8 @@ h2.group span { font-size: 11px; letter-spacing: 0; text-transform: none; opacit
 .tile.route.new-route .plus { font-size: 34px; line-height: 1; color: #ffb347; }
 .badge.yours { background: #2f7de1; border-color: #2f7de1; }
 .link-btn.del-route { font-size: 12px; margin-top: 8px; }
+
+/* Garage rows (team cars, supercars, fun rides) */
+.car-group { grid-column: 1 / -1; margin: 8px 0 0; font-size: 12px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.6; font-weight: 700; }
+.car-group span { font-size: 11px; letter-spacing: 0; text-transform: none; opacity: 0.8; margin-left: 8px; font-weight: 500; }
+.tile.car.super small { color: #ffd27a; opacity: 0.9; }

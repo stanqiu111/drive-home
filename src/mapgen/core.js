@@ -110,8 +110,8 @@ export const GLOBAL_PROJ = makeProjection(START);
 
 // ---------- helpers ----------
 export const r1 = (v) => Math.round(v * 10) / 10;
-const arrMin = (a) => a.reduce((m, v) => (v < m ? v : m), Infinity);
-const arrMax = (a) => a.reduce((m, v) => (v > m ? v : m), -Infinity);
+export const arrMin = (a) => a.reduce((m, v) => (v < m ? v : m), Infinity);
+export const arrMax = (a) => a.reduce((m, v) => (v > m ? v : m), -Infinity);
 const r2 = (v) => Math.round(v * 100) / 100;
 
 export function resample(pts, step) {
@@ -1316,6 +1316,32 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
   mapLandmarks.sort((a, b) => a.s - b.s);
   log(`  landmarks on route: ${mapLandmarks.map((l) => l.name).join(', ') || 'none'}`);
 
+  // Named places from OpenStreetMap points (shops, restaurants, gas stations…): each lends
+  // its name, brand and kind to the footprint it stands in; the others near the road are
+  // listed in `pois` (a gas station whose canopy has no footprint, a kiosk).
+  const places = (osm.pois ?? []).map((pl) => ({ t: pl.t, xy: P(pl.c[0], pl.c[1]), used: false }));
+  const PLACE_CELL = 50;
+  const placeGrid = new Map();
+  for (const pl of places) {
+    const k = `${Math.floor(pl.xy[0] / PLACE_CELL)},${Math.floor(pl.xy[1] / PLACE_CELL)}`;
+    if (!placeGrid.has(k)) placeGrid.set(k, []);
+    placeGrid.get(k).push(pl);
+  }
+  const placesIn = (ring) => {
+    const xs = ring.map((q) => q[0]);
+    const zs = ring.map((q) => q[1]);
+    const [x0, z0, x1, z1] = [arrMin(xs), arrMin(zs), arrMax(xs), arrMax(zs)];
+    const out = [];
+    for (let i = Math.floor(x0 / PLACE_CELL); i <= Math.floor(x1 / PLACE_CELL); i++) {
+      for (let j = Math.floor(z0 / PLACE_CELL); j <= Math.floor(z1 / PLACE_CELL); j++) {
+        for (const pl of placeGrid.get(`${i},${j}`) ?? []) if (!pl.used && pointInRing(pl.xy[0], pl.xy[1], ring)) out.push(pl);
+      }
+    }
+    return out;
+  };
+  const placeKind = (t) => (t ? t.amenity || t.shop || t.tourism || t.leisure || t.office || null : null);
+  const placeRank = (t) => (t.brand ? 4 : 0) + (t.shop || t.amenity ? 2 : 0) + (t.name ? 1 : 0);
+
   const buildings = [];
   const classCount = {};
   const addBuilding = (ring, h, tall, tags) => {
@@ -1347,8 +1373,18 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
     }
     classCount[cls] = (classCount[cls] || 0) + 1;
     const b = { h: Math.round(h * 10), c: CLASS[cls], p: ring.flatMap(([x, z]) => [Math.round(x * 10), Math.round(z * 10)]) };
-    const name = t?.name || t?.brand;
+    // Its name (the building's own, else the main place inside), brand and kind; other named
+    // tenants (a strip mall's shops) in `ps`.
+    const tenants = placesIn(ring).sort((a, c) => placeRank(c.t) - placeRank(a.t));
+    for (const pl of tenants) pl.used = true;
+    const main = t && (t.name || t.brand) ? t : tenants[0]?.t ?? null;
+    const name = main?.name || main?.brand;
     if (name && area > 150) b.n = name;
+    if (main?.brand) b.br = main.brand;
+    const kind = placeKind(main) ?? placeKind(t);
+    if (kind) b.k = kind;
+    const others = tenants.map((pl) => pl.t).filter((pt) => pt !== main && (pt.name || pt.brand)).slice(0, 8);
+    if (others.length) b.ps = others.map((pt) => [pt.name || pt.brand, pt.brand || '', placeKind(pt) || '']);
     if (t?.['building:levels'] > 0) b.l = parseInt(t['building:levels'], 10);
     if (t?.['roof:shape']) b.r = t['roof:shape'];
     if (zone && HERITAGE_ZONES.test(zone)) b.hz = 1;
@@ -1368,6 +1404,17 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
     if (addBuilding(w.ring, osmHeight(w.t), false, w.t)) osmCount++;
   }
   log(`  ${buildings.length} buildings (${osmCount} from OpenStreetMap): ${JSON.stringify(classCount)}`);
+  const pois = [];
+  for (const pl of places) {
+    if (pl.used) continue;
+    const [x, z] = pl.xy;
+    if (!index.nearest(x, z, 200) || excluded(x, z)) continue;
+    const o = { k: placeKind(pl.t) || '', x: r1(x), z: r1(z) };
+    if (pl.t.name) o.n = pl.t.name;
+    if (pl.t.brand) o.br = pl.t.brand;
+    pois.push(o);
+  }
+  log(`  ${buildings.filter((b) => b.k).length} buildings with a known use, ${buildings.filter((b) => b.br).length} with a brand; ${pois.length} other places by the road (${pois.filter((o) => o.k === 'fuel').length} gas stations)`);
 
   progress(0.95, 'Signs and traffic lights');
   // Exit signs: ramps (link roads) that leave the route carry OSM `destination` tags,
@@ -1492,6 +1539,7 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
     roads: otherRoads,
     piers: structures.piers,
     buildings,
+    ...(pois.length ? { pois } : {}),
     signals,
     exits,
     landmarks: mapLandmarks,

@@ -12,7 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { makeProjection, routeFromCoords, osmNearRoutes, loadRooflines, loadZoning, buildMapData } from '../../src/mapgen/core.js';
+import { makeProjection, routeFromCoords, trimRouteAtLandmarks, osmNearRoutes, loadRooflines, loadZoning, buildMapData } from '../../src/mapgen/core.js';
 import { tilesForRoutes, mergeTiles } from '../../src/mapgen/osm-tiles.js';
 import { sampleDEM } from '../../src/mapgen/dem.js';
 import { osrmRouteUrl } from '../../src/mapgen/edmonton.js';
@@ -68,7 +68,7 @@ for (const [i, [a, b]] of todo) {
   const j = await getJSON(osrmRouteUrl(start, dest));
   await sleep(1100); // the OSRM demo server asks for at most one request a second
   const proj = makeProjection(start);
-  const pts = routeFromCoords(j.routes[0].geometry.coordinates, proj);
+  const pts = trimRouteAtLandmarks(routeFromCoords(j.routes[0].geometry.coordinates, proj), proj);
   const tiles = [...tilesForRoutes([pts], proj)]
     .map((k) => path.join(ROOT, 'public/osm/t', `${k}.json`))
     .filter((f) => fs.existsSync(f))

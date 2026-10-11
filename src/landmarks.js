@@ -140,8 +140,9 @@ function roadIntrusions(model, routeAt) {
   const test = () => {
     const r = routeAt(p.x, p.z);
     // Inside the road edges and from just above the surface (kerbs and lawns flush with the
-    // road are fine) to 4.5 m up, where a car or the chase camera would hit it.
-    if (!r || p.y < r.y + 0.05 || p.y > r.y + 4.5) return;
+    // road are fine) to 4.5 m up, where a car or the chase camera would hit it. Nothing counts
+    // before the start or past the finish, where the road doesn't go on.
+    if (!r || r.beyond || p.y < r.y + 0.05 || p.y > r.y + 4.5) return;
     if (r.lat > r.left - 0.1 && r.lat < r.right + 0.1) hits.push({ s: r.s, lat: r.lat, h: p.y - r.y });
   };
   model.updateMatrixWorld(true);

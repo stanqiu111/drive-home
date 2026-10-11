@@ -3,7 +3,7 @@
 // (public/osm), buildings and zoning from the City of Edmonton, terrain from NRCan. Posts
 // { type: 'progress', f: 0..1, label } while it works, then { type: 'done', out, meta } or
 // { type: 'error', message }. Started by src/custom-route.js.
-import { makeProjection, routeFromCoords, osmNearRoutes, loadRooflines, loadZoning, buildMapData, STEP } from './core.js';
+import { makeProjection, routeFromCoords, trimRouteAtLandmarks, osmNearRoutes, loadRooflines, loadZoning, buildMapData, STEP } from './core.js';
 import { tilesForRoutes, mergeTiles, tileUrl } from './osm-tiles.js';
 import { sampleDEM } from './dem.js';
 import { osrmRouteUrl, CUSTOM_MIN_KM as MIN_KM, CUSTOM_MAX_KM as MAX_KM } from './edmonton.js';
@@ -53,7 +53,9 @@ async function build({ id, name, from, to, start, dest, coords }) {
     coords = j.routes[0].geometry.coordinates;
   }
   const proj = makeProjection(start);
-  const pts = routeFromCoords(coords, proj);
+  const full = routeFromCoords(coords, proj);
+  const pts = trimRouteAtLandmarks(full, proj);
+  if (pts.length < full.length * 0.6 && pts.length * STEP < 1000) throw new Error('Most of that drive is inside a landmark’s grounds. Pick places farther apart.');
   const km = (pts.length * STEP) / 1000;
   if (km < MIN_KM) throw new Error(`That drive is only ${km.toFixed(1)} km. Pick places at least ${MIN_KM} km apart.`);
   if (km > MAX_KM) throw new Error(`That drive is ${km.toFixed(0)} km. Custom routes can be up to ${MAX_KM} km.`);

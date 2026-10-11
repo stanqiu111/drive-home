@@ -644,6 +644,42 @@ export function routeFromCoords(coords, proj = GLOBAL_PROJ) {
 }
 export { osrmRouteUrl } from './edmonton.js';
 
+// Whether a point (in `proj` coordinates) is on a hand-made landmark's grounds: its excludeR
+// circle or excludeBox (landmark-list.js) or a skyline tower's circle, where generic
+// buildings are dropped and the model stands.
+export function landmarkSiteTest(proj = GLOBAL_PROJ) {
+  const sites = LANDMARK_LIST.filter((L) => L.excludeR > 0 || L.excludeBox).map((L) => ({ ...L, xy: proj.project(L.lon, L.lat) }));
+  const towers = SKYLINE_TOWERS.filter((T) => T.excludeR > 0).map((T) => ({ r: T.excludeR, xy: proj.project(T.lon, T.lat) }));
+  return (x, z) => sites.some((L) => (L.excludeR > 0 && Math.hypot(L.xy[0] - x, L.xy[1] - z) < L.excludeR)
+    || (L.excludeBox && Math.abs(x - L.xy[0] - (L.excludeBox[2] ?? 0)) < L.excludeBox[0] && Math.abs(z - L.xy[1] - (L.excludeBox[3] ?? 0)) < L.excludeBox[1]))
+    || towers.some((T) => Math.hypot(T.xy[0] - x, T.xy[1] - z) < T.r);
+}
+
+// A custom route that starts or ends at a landmark (a mall, an arena, a tower) would begin or
+// end inside its model: drop the ends that lie on landmark grounds, so the drive starts and
+// finishes on the road outside. Custom routes only (src/mapgen/worker.js).
+export function trimRouteAtLandmarks(pts, proj) {
+  const inSite = landmarkSiteTest(proj);
+  let a = 0;
+  while (a < pts.length - 1 && inSite(...pts[a])) a++;
+  // The finish also needs its ending-scene spot off the grounds: from 25 m before the end to
+  // 14 m past it, out to 28 m on the right (the spot buildMapData clears of buildings).
+  const finishClear = (i) => {
+    const [px, pz] = pts[i];
+    const [qx, qz] = pts[Math.max(0, i - 3)];
+    const l = Math.hypot(px - qx, pz - qz) || 1;
+    const tx = (px - qx) / l;
+    const tz = (pz - qz) / l;
+    for (const along of [-25, 0, 14]) {
+      for (const lat of [0, 5, 28]) if (inSite(px + tx * along - tz * lat, pz + tz * along + tx * lat)) return false;
+    }
+    return true;
+  };
+  let b = pts.length - 1;
+  while (b > a && !finishClear(b)) b--;
+  return pts.slice(a, b + 1);
+}
+
 
 // ---------- OSM data near the routes ----------
 export function corridorCells(routes, radius, cell = 100) {
@@ -796,6 +832,8 @@ function zoneClass(code, area, h) {
   return null;
 }
 const HERITAGE_ZONES = /^(HA|JAMSC)\b/;
+// Names that only number a building in a complex ("Building 5", "Tower B") aren't worth a sign.
+const NUMBERED_NAME = /^(building|bldg|block|tower|phase|wing|pavilion|unit|hall|annex)[\s#.-]*[0-9a-z]{1,3}$/i;
 
 // ---------- per-map build ----------
 function roadClass(hw) {
@@ -1402,7 +1440,7 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
     for (const pl of tenants) pl.used = true;
     const main = t && (t.name || t.brand) ? t : tenants[0]?.t ?? null;
     const name = main?.name || main?.brand;
-    if (name && area > 150) b.n = name;
+    if (name && area > 150 && !NUMBERED_NAME.test(name)) b.n = name;
     if (main?.brand) b.br = main.brand;
     const kind = placeKind(main) ?? placeKind(t);
     if (kind) b.k = kind;

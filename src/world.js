@@ -579,9 +579,11 @@ function routeAtFor(route) {
     const nr = nearest(x, z, 80);
     if (!nr) return null;
     const f0 = route.frame(nr.i * route.step);
-    const s = Math.max(0, Math.min(route.length, nr.i * route.step + (x - f0.x) * f0.tx + (z - f0.z) * f0.tz));
+    const along = nr.i * route.step + (x - f0.x) * f0.tx + (z - f0.z) * f0.tz;
+    const s = Math.max(0, Math.min(route.length, along));
     const f = route.frame(s);
-    return { s, lat: -(x - f.x) * f.tz + (z - f.z) * f.tx, left: f.left, right: f.right, y: f.y };
+    // `beyond`: before the start or past the finish, where the road doesn't go on.
+    return { s, lat: -(x - f.x) * f.tz + (z - f.z) * f.tx, left: f.left, right: f.right, y: f.y, beyond: along < 0 || along > route.length };
   };
 }
 

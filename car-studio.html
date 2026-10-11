@@ -1,0 +1,89 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Car studio</title></head>
+<body style="margin:0;background:#222;font:13px -apple-system,Helvetica,Arial,sans-serif;color:#eee">
+<!-- Dev harness: renders one car from src/cars.js from six angles, to compare with the
+     maker's official photos. /car-studio.html?id=crv
+       color=ff0000   paint colour (default: the car's own)
+       traffic=1      the traffic version (makeTrafficCar); far=1 its far (LOD) version
+       ortho=1        orthographic front/side/rear/top views with a 0.5 m grid, for
+                      checking proportions against side-profile photos and spec sheets
+     window.info has the model's real size (length, width, height in metres). -->
+<canvas id="c"></canvas>
+<div id="labels" style="position:absolute;left:0;top:0;pointer-events:none"></div>
+<script type="module">
+import * as THREE from 'three';
+import { CAR_MODELS, makeCar, makeTrafficCar, setTrafficDetail, initCarEnvironment } from '/src/cars.js';
+const q = new URLSearchParams(location.search);
+const id = q.get('id') || 'crv';
+const ortho = q.get('ortho') === '1';
+const W = 1800, H = 1000, COLS = 3, ROWS = 2;
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(1);
+renderer.setSize(W, H);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setScissorTest(true);
+initCarEnvironment(renderer);
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xdfe3e8);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8f99, 1.7));
+const sun = new THREE.DirectionalLight(0xffffff, 2.2);
+sun.position.set(-6, 10, -8);
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0xffffff, 0.8);
+fill.position.set(8, 4, 6);
+scene.add(fill);
+scene.add(new THREE.Mesh(new THREE.PlaneGeometry(200, 200).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xc9ccd1, roughness: 1 })));
+const grid = new THREE.GridHelper(20, 40, 0x7a7f88, 0xa8adb5); // 0.5 m squares
+grid.position.y = 0.002;
+scene.add(grid);
+
+const d = CAR_MODELS[id];
+const color = q.get('color') ? parseInt(q.get('color'), 16) : undefined;
+const car = q.get('traffic') === '1' || q.get('far') === '1' ? makeTrafficCar(id, color) : makeCar(id, color);
+if (q.get('far') === '1') setTrafficDetail(car, 1000);
+scene.add(car);
+// The soft shadow (the car's last child) is bigger than the car: leave it out of the size.
+const shadow = car.children[car.children.length - 1];
+shadow.visible = false;
+car.updateMatrixWorld(true);
+const box = new THREE.Box3();
+car.traverseVisible((o) => { if (o.isMesh) box.union(new THREE.Box3().setFromObject(o, true)); });
+shadow.visible = true;
+const size = box.getSize(new THREE.Vector3());
+const mid = box.getCenter(new THREE.Vector3());
+
+// [label, azimuth from the car's nose (deg, + = towards its right side), elevation (deg)]
+const VIEWS = ortho
+  ? [['front', 0, 0], ['right side', 90, 0], ['rear', 180, 0], ['top', 0, 90], ['left side', -90, 0], ['front 3/4', 35, 10]]
+  : [['front 3/4', 35, 8], ['right side', 90, 2], ['rear 3/4', 145, 10], ['front', 0, 4], ['rear', 180, 6], ['left 3/4 high', -50, 28]];
+const labels = [];
+VIEWS.forEach(([name, az, el], i) => {
+  const vw = W / COLS, vh = H / ROWS;
+  const x = (i % COLS) * vw, y = (ROWS - 1 - Math.floor(i / COLS)) * vh;
+  renderer.setViewport(x, y, vw, vh);
+  renderer.setScissor(x, y, vw, vh);
+  const a = az * Math.PI / 180, e = el * Math.PI / 180;
+  // The nose points to -z, its right side to +x.
+  const dir = new THREE.Vector3(Math.sin(a) * Math.cos(e), Math.sin(e), -Math.cos(a) * Math.cos(e));
+  let cam;
+  const useOrtho = ortho && name !== 'front 3/4';
+  if (useOrtho) {
+    const span = Math.max(size.x, size.y, size.z) * 0.62;
+    cam = new THREE.OrthographicCamera(-span * vw / vh, span * vw / vh, span, -span, 0.1, 100);
+    cam.position.copy(mid).addScaledVector(dir, 30);
+  } else {
+    // A long-ish lens, like press photos.
+    cam = new THREE.PerspectiveCamera(24, vw / vh, 0.1, 200);
+    cam.position.copy(mid).addScaledVector(dir, Math.max(size.x, size.z) * 2.6);
+  }
+  if (el > 80) cam.up.set(0, 0, -1);
+  cam.lookAt(mid);
+  renderer.render(scene, cam);
+  labels.push(`<div style="position:absolute;left:${x + 8}px;top:${H - y - vh + 6}px;background:#0008;padding:2px 6px;border-radius:4px">${name}</div>`);
+});
+document.getElementById('labels').innerHTML = labels.join('')
+  + `<div style="position:absolute;left:8px;top:${H + 6}px;white-space:nowrap">${d.brand} ${d.name}: ${size.z.toFixed(2)} m long, ${size.x.toFixed(2)} m wide (incl. mirrors), ${size.y.toFixed(2)} m tall</div>`;
+const tris = (() => { let t = 0; car.traverse((o) => { if (o.isMesh && o.visible) { const g = o.geometry; t += (g.index ? g.index.count : g.attributes.position.count) / 3; } }); return Math.round(t); })();
+window.info = { id, length: +size.z.toFixed(3), width: +size.x.toFixed(3), height: +size.y.toFixed(3), triangles: tris };
+window.ready = true;
+</script></body></html>

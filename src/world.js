@@ -4,6 +4,8 @@ import { Route } from './route.js';
 import { markingPlan, activeSignals, foldCurvature } from './lane-layout.js';
 import { overheadClearance } from './clearance.js';
 import { buildLandmarks, landmarkFootprints, projectTo } from './landmarks.js';
+import { brandLook } from './brands.js';
+import { planBrandSites, buildBrandSites } from './brand-sites.js';
 
 const FOG_NEAR = 250;
 export const FOG_FAR = 1800;
@@ -1001,38 +1003,17 @@ const APT_TINTS = [0xe3d9c6, 0xcfc8bd, 0xd9d2c2, 0xc2c9bb, 0xd8cfc9, 0xe6e0d4];
 const BIGBOX_TINTS = [0xece6da, 0xe0dcd4, 0xf1efe9, 0xd9d4c8, 0xe9e3d3];
 const INDUSTRIAL_TINTS = [0xd5d8dc, 0xc3c8ce, 0xe3e5e8, 0xb9c4cf, 0xd8d3c6];
 const BRICK_TINTS = [0xffffff, 0xe8d9cf, 0xd8c7bd, 0xf0e4dc];
-// Well-known chains get their colours (walls or accent band) so the boxes read instantly.
-const BRANDS = [
-  [/ikea/i, { wall: 0x0a58c7, band: 0xffd21a }],
-  [/canadian tire/i, { wall: 0xe8e4dc, band: 0xd9271f }],
-  [/walmart|wal-mart/i, { wall: 0xe9e9e6, band: 0x1f6fd1 }],
-  [/home depot/i, { wall: 0xe2ddd3, band: 0xf27b1b }],
-  [/best buy/i, { wall: 0xe8e8e8, band: 0x1a4fb5 }],
-  [/costco/i, { wall: 0xe6e3dc, band: 0xd43a2a }],
-  [/superstore|loblaw/i, { wall: 0xeadf3a, band: 0x1c1c1e }],
-  [/rona/i, { wall: 0xdcdcd8, band: 0x2f7a46 }],
-  [/save-on|safeway|sobeys/i, { wall: 0xe4e0d6, band: 0xc8102e }],
-  [/london drugs/i, { wall: 0xe2dfd8, band: 0x7a1f3a }],
-  [/staples/i, { wall: 0xe8e6e0, band: 0xcc0000 }],
-  [/cineplex|cinema/i, { wall: 0x2a2d33, band: 0x1f6fd1 }],
-  [/universiade|butterdome/i, { wall: 0xf2c230, band: 0xf2c230 }],
-  [/ritchie mill/i, { brick: true }],
-  [/rossdale/i, { brick: true }],
-  [/holiday inn/i, { wall: 0xe6e0d0, band: 0x2a7d3f }],
-  [/sandman/i, { wall: 0x4a4d52, band: 0xb3202a }],
-];
-function brandFor(name) {
-  if (!name) return null;
-  for (const [re, v] of BRANDS) if (re.test(name)) return v;
-  return null;
-}
+// Well-known chains get their colours (walls or accent band) so the boxes read instantly
+// (brandLook in brands.js; brand-sites.js adds their logos, portals and pylon signs).
 // Building classes written by tools/build-maps.mjs.
 const C = { unknown: 0, house: 1, rowhouse: 2, apartments: 3, retail: 4, industrial: 5, office: 6, civic: 7, outbuilding: 8, hotel: 9, parking: 10, church: 11, school: 12, bigbox: 13 };
 // Wall style per class: texture key, tile size in metres (u, v), tints, and whether it is
 // a glass tower. Tall buildings of any class become towers.
 function wallStyle(cls, h, area, b) {
-  const brand = brandFor(b?.n);
+  const brand = brandLook(b);
   if (brand?.brick) return { key: 'brick', uw: 6, vh: 3, tints: BRICK_TINTS };
+  // Chain stores (one storey): tilt-up panels like a big box, not shops with flats above.
+  if (brand?.store && h < 9.5 && cls !== C.house && cls !== C.rowhouse && cls !== C.apartments) return { key: 'bigbox', uw: 8, vh: h, tints: BIGBOX_TINTS };
   // Old main-street zones (Whyte Ave, Jasper Ave): brick blocks.
   if (b?.hz && h < 16 && cls !== C.house && cls !== C.outbuilding) return { key: 'brick', uw: 6, vh: 3, tints: BRICK_TINTS };
   // Tall residential: 1970s concrete slabs with balcony grids, not glass towers.
@@ -1120,7 +1101,8 @@ function faceQuad(mb, a, b, c, d, uvs, col, hint) {
 }
 const SOLID_UV = [0.97, 0.03, 0.97, 0.03, 0.97, 0.03, 0.97, 0.03];
 
-async function buildBuildings(list, heightAt, occupancy, sl = NO_SLICES) {
+// `skip`: footprints brand-sites.js draws itself (gas canopies and shops, brand restaurants).
+async function buildBuildings(list, heightAt, occupancy, sl = NO_SLICES, skip = new Set()) {
   const chunks = new Map();
   const getChunk = (key) => {
     if (!chunks.has(key)) chunks.set(key, new MeshBuilder());
@@ -1144,11 +1126,16 @@ async function buildBuildings(list, heightAt, occupancy, sl = NO_SLICES) {
     if (nn.y < 0) nn.negate();
     faceQuad(mb, a, b, c, d, [along(a), slope(a) * 1.3, along(b), slope(b) * 1.3, along(c), slope(c) * 1.3, along(d), slope(d) * 1.3], col, nn);
   };
-  for (const b of list) {
+  for (let bi = 0; bi < list.length; bi++) {
+    const b = list[bi];
     if (sl.due()) await sl.wait();
     const h = b.h / 10;
     let ring = [];
     for (let k = 0; k < b.p.length; k += 2) ring.push([b.p[k] / 10, b.p[k + 1] / 10]);
+    if (skip.has(bi)) {
+      occupancy.addPolygon(ring);
+      continue;
+    }
     let base = Infinity;
     let cx = 0;
     let cz = 0;
@@ -1165,7 +1152,7 @@ async function buildBuildings(list, heightAt, occupancy, sl = NO_SLICES) {
     const area0 = polyArea(ring);
     const style = wallStyle(b.c ?? 0, h, area0, b);
     const tower = style.key === 'tower';
-    const brand = brandFor(b.n);
+    const brand = brandLook(b);
     color.setHex(brand?.wall && (style.key === 'bigbox' || style.key === 'apt') ? brand.wall : style.tints[Math.floor(hash(cx, cz) * style.tints.length)]);
     // Big boxes: the accent band and plinth come from the texture; the body gets the tint.
 
@@ -1203,7 +1190,7 @@ async function buildBuildings(list, heightAt, occupancy, sl = NO_SLICES) {
       const u1 = u + len / winW;
       const v1 = (top - base) / winH;
       mb.quad(V(x1, base, z1), V(x2, base, z2), V(x2, top, z2), V(x1, top, z1), [u, 0, u1, 0, u1, v1, u, v1], color, n);
-      if (parapet && brand?.band && style.key === 'bigbox') {
+      if (parapet && brand?.band && (style.key === 'bigbox' || brand.hotel)) {
         // Brand accent band along the top of the wall.
         bandColor.setHex(brand.band);
         const yb = top - 1.6;
@@ -1303,172 +1290,6 @@ async function buildBuildings(list, heightAt, occupancy, sl = NO_SLICES) {
     group.add(new THREE.Mesh(mb.build(), mats[key.split(',')[2]] ?? mats.house));
     if (sl.due()) await sl.wait();
   }
-  return group;
-}
-
-// ---------- store signs ----------
-// Real business names on the wall that faces the road, so players recognise where
-// they are (IKEA, the Gateway Blvd hotels, car dealerships…). All names share one
-// texture atlas and one mesh.
-const SIGN_CLASSES = new Set([4, 6, 7, 9, 12, 13]); // retail, office, civic, hotel, school, bigbox
-const SIGN_STYLES = [
-  ['#ffffff', '#c8102e'], ['#ffffff', '#1f4fb0'], ['#ffd84d', '#1c1c1e'], ['#1c1c1e', '#f4f4f0'], ['#ffffff', '#1d7a46'],
-  ['#ffffff', '#e8731c'], ['#f4f4f0', '#4a2d8a'], ['#1c1c1e', '#ffc42e'],
-];
-
-function buildSigns(list, route, heightAt) {
-  const nearest = routeLookup(route);
-  const want = [];
-  for (const b of list) {
-    if (!b.n || !SIGN_CLASSES.has(b.c)) continue;
-    const ring = [];
-    for (let k = 0; k < b.p.length; k += 2) ring.push([b.p[k] / 10, b.p[k + 1] / 10]);
-    let cx = 0;
-    let cz = 0;
-    for (const [x, z] of ring) { cx += x; cz += z; }
-    cx /= ring.length;
-    cz /= ring.length;
-    const nr = nearest(cx, cz, 340);
-    if (!nr) continue;
-    const bigLot = b.c === 13 || b.c === 9 || polyArea(ring) >= 2000;
-    if (!bigLot && nr.d > 220) continue; // small shops far behind a parking lot aren't worth a sign
-    // The wall whose outward normal points at the road, preferring long walls.
-    const rx = route.x[nr.i];
-    const rz = route.z[nr.i];
-    let best = null;
-    for (let k = 0; k < ring.length; k++) {
-      const [x1, z1] = ring[k];
-      const [x2, z2] = ring[(k + 1) % ring.length];
-      const len = Math.hypot(x2 - x1, z2 - z1);
-      if (len < 6) continue;
-      const mx = (x1 + x2) / 2;
-      const mz = (z1 + z2) / 2;
-      // Outward normal: away from the centroid.
-      let nx = -(z2 - z1) / len;
-      let nz = (x2 - x1) / len;
-      if ((mx - cx) * nx + (mz - cz) * nz < 0) { nx = -nx; nz = -nz; }
-      const toRoad = Math.hypot(rx - mx, rz - mz) || 1;
-      const facing = ((rx - mx) * nx + (rz - mz) * nz) / toRoad;
-      if (facing < 0.3) continue;
-      const score = facing * Math.min(len, 40) - toRoad * 0.05;
-      if (!best || score > best.score) best = { score, x1, z1, x2, z2, len, nx, nz, mx, mz };
-    }
-    if (!best) continue;
-    // Where a roadside pylon sign would stand: at the road edge, on the building's side.
-    const f = route.frame(nr.i * route.step);
-    const side = (cx - rx) * -f.tz + (cz - rz) * f.tx > 0 ? 1 : -1;
-    const edge = side > 0 ? f.right : f.left;
-    const pylon = route.toWorld(nr.i * route.step, edge + side * 7, 0);
-    want.push({ b, best, ring, h: b.h / 10, big: bigLot, pylon, far: nr.d, tangent: [f.tx, f.tz] });
-  }
-  if (!want.length) return new THREE.Group();
-  // Big, close places first, so they are the ones kept if the atlas fills up.
-  want.sort((a, b) => (b.big - a.big) || (a.far - b.far));
-
-  // Pack the names into an atlas (shelf packing), sized to what this map needs.
-  const SIZE = 2048;
-  const ROW = 64;
-  const FONT = 'bold 46px -apple-system, Helvetica, Arial, sans-serif';
-  const names = [...new Set(want.map((w) => w.b.n))];
-  const measure = document.createElement('canvas').getContext('2d');
-  measure.font = FONT;
-  const widths = new Map(names.map((n) => [n, Math.min(SIZE, Math.ceil(measure.measureText(n).width) + 28)]));
-  let rows = 1;
-  let fill = 0;
-  for (const n of names) {
-    if (fill + widths.get(n) > SIZE) { rows++; fill = 0; }
-    fill += widths.get(n);
-  }
-  const HEIGHT = Math.min(SIZE, 2 ** Math.ceil(Math.log2(rows * ROW)));
-  const canvas = document.createElement('canvas');
-  canvas.width = SIZE;
-  canvas.height = HEIGHT;
-  const g = canvas.getContext('2d');
-  g.font = FONT;
-  g.textBaseline = 'middle';
-  let px = 0;
-  let py = 0;
-  const slots = new Map();
-  for (const w of want) {
-    const name = w.b.n;
-    if (slots.has(name)) continue;
-    const tw = widths.get(name);
-    if (px + tw > SIZE) { px = 0; py += ROW; }
-    if (py + ROW > HEIGHT) break;
-    const brand = brandFor(name);
-    let [fg, bg] = SIGN_STYLES[Math.floor(hash(name.length * 3.1, name.charCodeAt(0)) * SIGN_STYLES.length)];
-    if (brand?.band) {
-      bg = `#${brand.band.toString(16).padStart(6, '0')}`;
-      const c = new THREE.Color(brand.band);
-      fg = (c.r * 0.299 + c.g * 0.587 + c.b * 0.114) > 0.6 ? '#1c1c1e' : '#ffffff';
-      if (/ikea/i.test(name)) { bg = '#0a58c7'; fg = '#ffd21a'; }
-    }
-    g.fillStyle = bg;
-    g.fillRect(px, py, tw, ROW);
-    g.fillStyle = fg;
-    g.fillText(name, px + 14, py + ROW / 2 + 2);
-    slots.set(name, [px / SIZE, 1 - (py + ROW) / HEIGHT, (px + tw) / SIZE, 1 - py / HEIGHT, tw / ROW]);
-    px += tw;
-  }
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-
-  const mb = new MeshBuilder();
-  const post = new MeshBuilder();
-  const V = (x, y, z) => new THREE.Vector3(x, y, z);
-  for (const { b, best, h, big, pylon, far, tangent } of want) {
-    const slot = slots.get(b.n);
-    if (!slot) continue;
-    const [u0, v0, u1, v1, aspect] = slot;
-    const base = (heightAt(best.mx, best.mz) ?? 0) - 0.5;
-    const top = base + 0.5 + h;
-    // Letters: big-box and hotel signs are tall; small shops get a fascia strip.
-    const signH = Math.min(big ? 2.4 : 1.1, h * 0.35);
-    const signW = Math.min(signH * aspect, best.len * 0.9);
-    const cy = top - signH * 0.8 - (big ? 0.6 : 0.3);
-    // Text runs left→right as seen from outside: the normal rotated a quarter turn.
-    let ex = best.nz;
-    let ez = -best.nx;
-    const off = 0.08;
-    const a = V(best.mx - ex * signW / 2 + best.nx * off, cy - signH / 2, best.mz - ez * signW / 2 + best.nz * off);
-    const c = V(best.mx + ex * signW / 2 + best.nx * off, cy + signH / 2, best.mz + ez * signW / 2 + best.nz * off);
-    const n = V(best.nx, 0, best.nz);
-    faceQuad(mb, V(a.x, a.y, a.z), V(c.x, a.y, c.z), V(c.x, c.y, c.z), V(a.x, c.y, a.z), [u0, v0, u1, v0, u1, v1, u0, v1], null, n);
-    // Big boxes and hotels also get a tall pylon sign at the road edge, like the real
-    // ones along Gateway Blvd, so the name is readable from the car.
-    if (big && best.len > 25) {
-      const px2 = pylon.x;
-      const pz2 = pylon.z;
-      const gy = pylon.y + 0.05;
-      const ph = far > 60 ? 4 : 3;
-      const pw = Math.min(11, ph * aspect);
-      const py0 = gy + (far > 60 ? 9 : 6);
-      void tangent;
-      post.quad(V(px2 - 0.2, gy, pz2 - 0.2), V(px2 + 0.2, gy, pz2 - 0.2), V(px2 + 0.2, py0, pz2 - 0.2), V(px2 - 0.2, py0, pz2 - 0.2));
-      post.quad(V(px2 + 0.2, gy, pz2 + 0.2), V(px2 - 0.2, gy, pz2 + 0.2), V(px2 - 0.2, py0, pz2 + 0.2), V(px2 + 0.2, py0, pz2 + 0.2));
-      post.quad(V(px2 - 0.2, gy, pz2 + 0.2), V(px2 - 0.2, gy, pz2 - 0.2), V(px2 - 0.2, py0, pz2 - 0.2), V(px2 - 0.2, py0, pz2 + 0.2));
-      post.quad(V(px2 + 0.2, gy, pz2 - 0.2), V(px2 + 0.2, gy, pz2 + 0.2), V(px2 + 0.2, py0, pz2 + 0.2), V(px2 + 0.2, py0, pz2 - 0.2));
-      // Two-sided panel facing along the road (readable while driving past). Each face's
-      // text runs left→right as seen from its own side.
-      const [tX, tZ] = tangent;
-      for (const sgn of [1, -1]) {
-        const nn = V(tX * sgn, 0, tZ * sgn);
-        const rx = nn.z;
-        const rz = -nn.x;
-        const ox = nn.x * 0.03;
-        const oz = nn.z * 0.03;
-        faceQuad(mb, V(px2 - rx * pw / 2 + ox, py0, pz2 - rz * pw / 2 + oz), V(px2 + rx * pw / 2 + ox, py0, pz2 + rz * pw / 2 + oz),
-          V(px2 + rx * pw / 2 + ox, py0 + ph, pz2 + rz * pw / 2 + oz), V(px2 - rx * pw / 2 + ox, py0 + ph, pz2 - rz * pw / 2 + oz),
-          [u0, v0, u1, v0, u1, v1, u0, v1], null, nn);
-      }
-    }
-  }
-  const group = new THREE.Group();
-  group.add(
-    new THREE.Mesh(mb.build(), new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.5 })),
-    new THREE.Mesh(post.build(), new THREE.MeshStandardMaterial({ color: 0x3a3d42, roughness: 0.6, side: THREE.DoubleSide })),
-  );
   return group;
 }
 
@@ -1864,9 +1685,14 @@ export async function buildWorld(data, { maxAnisotropy = 1, sl = NO_SLICES } = {
   await sl.tick();
   add('sideRoads', await buildSideRoads(data.roads, heightAt, asphalt, route, sl), buildPiers(data.piers));
   await sl.tick();
-  add('buildings', await buildBuildings(data.buildings, heightAt, occupancy, sl));
+  // Brand buildings and business signs (brand-sites.js): which footprints it draws itself is
+  // decided first, so the generic buildings skip them.
+  const nearest = routeLookup(route);
+  const brandPlan = await planBrandSites(data, nearest, sl);
   await sl.tick();
-  add('signs', buildSigns(data.buildings, route, heightAt));
+  add('buildings', await buildBuildings(data.buildings, heightAt, occupancy, sl, brandPlan.skip));
+  await sl.tick();
+  add('signs', await buildBrandSites(data, brandPlan, { route, heightAt, onRoad, nearest }, { sl, maxAnisotropy }));
   await sl.tick();
   add('exitSigns', buildExitSigns(route, data.exits));
   await sl.tick();

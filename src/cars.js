@@ -1016,10 +1016,13 @@ function buildShape(id) {
     return (a + (b - a) * ti) * (1 - tj) + (c + (e - c) * ti) * tj;
   };
 
-  // Glass-house section at u. It starts inside the body so the joint never shows.
+  // Glass-house section at u. It starts inside the body so the joint never shows. Opt-in: a 4th
+  // value in the `cabin` keyframes sets its half-width at that base (default: the body's full
+  // width), for a canopy narrower than the body (the McLaren's teardrop between its haunches).
+  const baseW = d.cabin.every((k) => k.length > 3) ? monotone(d.cabin.map(([u, , , b]) => [u, b])) : null;
   const gh = (u) => {
     const y0 = top(u) - 0.1;
-    return { y0, y1: Math.max(y0 + 0.02, roofY(u)), wb: half(u) - rTop * 0.7, wt: roofW(u) };
+    return { y0, y1: Math.max(y0 + 0.02, roofY(u)), wb: baseW ? baseW(u) : half(u) - rTop * 0.7, wt: roofW(u) };
   };
   const ghX = (u, y) => {
     if (u > cFront || u < cBack) return -1;
@@ -1501,8 +1504,9 @@ function buildParts(d, fn) {
       add('dark', arm.translate(s * 0.32 - 0.04, g.y1 + 0.03, -u));
     }
   }
-  // Third brake light at the top of the rear window.
-  if (d.backlight) {
+  // Third brake light at the top of the rear window (opt-out per car: `brakeLight: false`, for cars
+  // that have it elsewhere, like the 911's on its wing).
+  if (d.backlight && d.brakeLight !== false) {
     const u = d.backlight[0] + 0.02;
     add('tail', new THREE.BoxGeometry(0.34, 0.02, 0.05).translate(0, fn.roofY(u) + 0.02, -u));
   }
@@ -1663,6 +1667,7 @@ export function makeCar(id, color) {
       const parts = W[s];
       w.add(new THREE.Mesh(W.tire, tireMat), new THREE.Mesh(parts.face, rimMaterial), new THREE.Mesh(parts.dark, darkMat));
       w.position.set(s * geos.fn.wheelX(axle), geos.fn.wheelROf(axle), -axle);
+      w.userData.r = geos.fn.wheelROf(axle); // a bigger rear wheel turns slower
       car.add(w);
       wheels.push(w);
     }
@@ -1832,6 +1837,7 @@ export function makeTrafficCar(id, color) {
   const wheels = t.axles.map(({ axle, r, geo }) => {
     const g = new THREE.Group();
     g.position.set(0, r, -axle);
+    g.userData.r = r;
     g.add(mesh(geo, rimMaterial));
     near.add(g);
     return g;
@@ -2006,7 +2012,6 @@ function makeBike(id, color) {
 
 // Roll the wheels for a given distance travelled.
 export function spinWheels(car, distance) {
-  const a = distance / car.userData.wheelR;
-  for (const w of car.userData.wheels) w.rotation.x -= a;
+  for (const w of car.userData.wheels) w.rotation.x -= distance / (w.userData.r || car.userData.wheelR);
   car.userData.onSpin?.(distance);
 }

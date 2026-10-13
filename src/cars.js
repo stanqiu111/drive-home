@@ -810,6 +810,11 @@ function buildShape(id) {
   const rTop = Math.min(0.1, d.round * 0.5);
   const rtG = Math.min(0.22, d.round * 0.7);
   const tireW = d.tireW ?? 0.235;
+  // Optional d.rearWheel { r, w }: the rear axle's wheel radius and tyre width, for staggered
+  // supercar wheels (bigger, wider at the back). Without it every wheel is wheelR / tireW.
+  const RW = d.rearWheel;
+  const wheelROf = (axle) => (RW && axle === d.axles[1] ? RW.r : d.wheelR);
+  const tireWOf = (axle) => (RW && axle === d.axles[1] ? RW.w : tireW);
   const nose = d.nose ?? 0.13;
   const tail = d.tail ?? 0.11;
   const sillAt = S.sill ? monotone(S.sill) : null;
@@ -822,18 +827,18 @@ function buildShape(id) {
   };
 
   // Wheels sit just inside the widest line of the body; their wells are cut out of it.
-  const wheelX = (axle) => half(axle) - 0.015 - tireW / 2;
-  const arches = d.axles.map((a) => ({ u: a, R: d.wheelR + S.gap, xIn: half(a) - tireW - 0.05 }));
+  const wheelX = (axle) => half(axle) - 0.015 - tireWOf(axle) / 2;
+  const arches = d.axles.map((a) => ({ u: a, r: wheelROf(a), R: wheelROf(a) + S.gap, xIn: half(a) - tireWOf(a) - 0.05 }));
   const archAt = (u) => arches.find((A) => Math.abs(u - A.u) < A.R);
   // Top of the wheel opening at u (-Infinity away from the wheels).
   const archTop = (u) => {
     const A = archAt(u);
-    return A ? d.wheelR + Math.sqrt(A.R * A.R - (u - A.u) ** 2) : -Infinity;
+    return A ? A.r + Math.sqrt(A.R * A.R - (u - A.u) ** 2) : -Infinity;
   };
   // Distance outside the nearest wheel opening's edge (negative inside it).
   const archDist = (u, y) => {
     let best = Infinity;
-    for (const A of arches) best = Math.min(best, Math.hypot(u - A.u, y - d.wheelR) - A.R);
+    for (const A of arches) best = Math.min(best, Math.hypot(u - A.u, y - A.r) - A.R);
     return best;
   };
 
@@ -869,7 +874,7 @@ function buildShape(id) {
       for (const A of arches) {
         const du = u - A.u;
         const R = A.R + MOLD;
-        if (Math.abs(du) < R) moldY = Math.max(moldY, d.wheelR + Math.sqrt(R * R - du * du));
+        if (Math.abs(du) < R) moldY = Math.max(moldY, A.r + Math.sqrt(R * R - du * du));
       }
       moldY = Math.min(sideTop - 0.002, Math.max(sideBot + 0.002, moldY));
     } else if (sillAt) {
@@ -1141,7 +1146,7 @@ function buildShape(id) {
 
   const fn = {
     bottom, top, half, uFront, uBack, cFront, cBack, roofY, roofW, gh, bodyX, ghX, surfaceU, surfaceNormal, rtG,
-    tireW, wheelX, archTop,
+    tireW, wheelX, archTop, wheelROf, tireWOf,
   };
   const geos = {
     body: loft(body),
@@ -1153,6 +1158,8 @@ function buildShape(id) {
   };
   geos.parts = buildParts(d, fn);
   geos.wheel = buildWheel(d, fn);
+  geos.rearWheel = RW ? buildWheel({ ...d, wheelR: RW.r }, { ...fn, tireW: RW.w }) : geos.wheel;
+  geos.wheelOf = (axle) => (axle === d.axles[1] ? geos.rearWheel : geos.wheel);
   geoCache.set(id, geos);
   return geos;
 }
@@ -1179,7 +1186,7 @@ function shadowFor(d, fn) {
     for (const s of [-1, 1]) {
       const x = c.width / 2 + s * fn.wheelX(axle) * sx;
       const y = (L / 2 - axle) * sz;
-      const grad = g.createRadialGradient(x, y, 0, x, y, fn.tireW * sx * 1.4);
+      const grad = g.createRadialGradient(x, y, 0, x, y, fn.tireWOf(axle) * sx * 1.4);
       grad.addColorStop(0, 'rgba(0,0,0,0.55)');
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       g.fillStyle = grad;
@@ -1550,13 +1557,14 @@ function buildParts(d, fn) {
   }
 
   // Brake discs and calipers behind the spokes (they don't turn with the wheel).
-  const rimR = d.wheelR * (d.rim?.size ?? 0.7);
   for (const axle of d.axles) {
+    const wr = fn.wheelROf(axle);
+    const rimR = wr * (d.rim?.size ?? 0.7);
     for (const s of [-1, 1]) {
-      const cx = s * (fn.wheelX(axle) + fn.tireW / 2 - 0.085);
-      add('disc', new THREE.CylinderGeometry(rimR * 0.82, rimR * 0.82, 0.02, 28).rotateZ(Math.PI / 2).translate(cx, d.wheelR, -axle));
+      const cx = s * (fn.wheelX(axle) + fn.tireWOf(axle) / 2 - 0.085);
+      add('disc', new THREE.CylinderGeometry(rimR * 0.82, rimR * 0.82, 0.02, 28).rotateZ(Math.PI / 2).translate(cx, wr, -axle));
       const caliper = new THREE.BoxGeometry(0.05, 0.15, 0.09).translate(0, rimR * 0.68, 0).rotateX(axle > 0 ? -0.5 : 0.5);
-      add('caliper', caliper.translate(cx + s * 0.02, d.wheelR, -axle));
+      add('caliper', caliper.translate(cx + s * 0.02, wr, -axle));
     }
   }
 
@@ -1649,11 +1657,12 @@ export function makeCar(id, color) {
   const wheels = [];
   const rimMaterial = rimMatFor(geos.wheel.color);
   for (const axle of d.axles) {
+    const W = geos.wheelOf(axle);
     for (const s of [-1, 1]) {
       const w = new THREE.Group();
-      const parts = geos.wheel[s];
-      w.add(new THREE.Mesh(geos.wheel.tire, tireMat), new THREE.Mesh(parts.face, rimMaterial), new THREE.Mesh(parts.dark, darkMat));
-      w.position.set(s * geos.fn.wheelX(axle), d.wheelR, -axle);
+      const parts = W[s];
+      w.add(new THREE.Mesh(W.tire, tireMat), new THREE.Mesh(parts.face, rimMaterial), new THREE.Mesh(parts.dark, darkMat));
+      w.position.set(s * geos.fn.wheelX(axle), geos.fn.wheelROf(axle), -axle);
       car.add(w);
       wheels.push(w);
     }
@@ -1767,14 +1776,14 @@ function trafficGeos(id) {
   const geos = buildShape(id);
   const { parts, wheel: W, fn } = geos;
   const src = paletteSource();
-  const wheels = d.axles.flatMap((axle) => [-1, 1].map((s) => ({ axle, s, x: s * fn.wheelX(axle) })));
-  const at = (g, w) => g.clone().translate(w.x, d.wheelR, -w.axle);
+  const wheels = d.axles.flatMap((axle) => [-1, 1].map((s) => ({ axle, s, x: s * fn.wheelX(axle), r: fn.wheelROf(axle), W: geos.wheelOf(axle) })));
+  const at = (g, w) => g.clone().translate(w.x, w.r, -w.axle);
   const glassLoft = d.greenhouse === 'glass';
   const paintOf = (body, glass) => mergeGeometries([...body, ...(glassLoft ? [] : glass), ...(parts.paint ? [parts.paint] : [])]
     .map((g) => only(g, ['position', 'normal', 'color'])));
   const merge = (list) => mergeGeometries(list.filter(Boolean));
   const pal = (key, g, color = src[key].color) => (g ? paletteGeo(g, key, color) : null);
-  const wheelDark = wheels.map((w) => pal('dark', at(W[w.s].dark, w)));
+  const wheelDark = wheels.map((w) => pal('dark', at(w.W[w.s].dark, w)));
   const out = {
     rimColor: W.color,
     paint: paintOf(geos.body, geos.glass),
@@ -1786,19 +1795,20 @@ function trafficGeos(id) {
     shiny: merge(['chrome', 'lens', 'badge'].map((k) => pal(k, parts[k]))),
     plain: merge([
       pal('dark', parts.dark), ...wheelDark, pal('disc', parts.disc), pal('caliper', parts.caliper), pal('head', parts.head),
-      ...wheels.map((w) => pal('tire', at(W.tire, w))), pal('amber', parts.amber),
+      ...wheels.map((w) => pal('tire', at(w.W.tire, w))), pal('amber', parts.amber),
     ]),
     farPlain: merge([
       pal('dark', parts.dark), ...wheelDark, pal('head', parts.head),
       pal('grille', parts.grille, averageColor(grilleTex)), pal('plate', parts.plate, averageColor(plateTex)),
-      ...wheels.map((w) => pal('tire', at(W.farTire, w))), pal('amber', parts.amber),
+      ...wheels.map((w) => pal('tire', at(w.W.farTire, w))), pal('amber', parts.amber),
     ]),
     // Both rims of an axle, around the axle's centre (they spin together).
     axles: d.axles.map((axle) => ({
       axle,
-      geo: mergeGeometries([-1, 1].map((s) => W[s].face.clone().translate(s * fn.wheelX(axle), 0, 0))),
+      r: fn.wheelROf(axle),
+      geo: mergeGeometries([-1, 1].map((s) => geos.wheelOf(axle)[s].face.clone().translate(s * fn.wheelX(axle), 0, 0))),
     })),
-    farRims: mergeGeometries(wheels.map((w) => at(W[w.s].face, w))),
+    farRims: mergeGeometries(wheels.map((w) => at(w.W[w.s].face, w))),
   };
   trafficCache.set(id, out);
   return out;
@@ -1819,9 +1829,9 @@ export function makeTrafficCar(id, color) {
   near.add(mesh(t.paint, paint), mesh(t.tail, tail), mesh(t.plain, pal.plain), mesh(t.shiny, pal.shiny), mesh(t.glass, glassMat));
   if (t.grille) near.add(mesh(t.grille, grilleMat));
   if (t.plate) near.add(mesh(t.plate, plateMat));
-  const wheels = t.axles.map(({ axle, geo }) => {
+  const wheels = t.axles.map(({ axle, r, geo }) => {
     const g = new THREE.Group();
-    g.position.set(0, d.wheelR, -axle);
+    g.position.set(0, r, -axle);
     g.add(mesh(geo, rimMaterial));
     near.add(g);
     return g;

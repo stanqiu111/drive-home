@@ -39,6 +39,32 @@ export const SAMPLE_PACKS = {
       { id: 'on_6900', load: 'on', rpm: 6931.9, len: 0.294281, at: 2.572 },
     ],
   },
+  v8: {
+    file: 'engine-v8.m4a',
+    items: [
+      { id: 'idle', load: 'off', rpm: 1130, len: 1.274375, at: 0.12 },
+      { id: 'on_1600', load: 'on', rpm: 1624.8, len: 1.181688, at: 1.634375 },
+      { id: 'on_2400', load: 'on', rpm: 2411.3, len: 0.696719, at: 3.056063 },
+      { id: 'on_2800', load: 'on', rpm: 2759.5, len: 0.78275, at: 3.992781 },
+      { id: 'on_3700', load: 'on', rpm: 3751.9, len: 0.159906, at: 5.015531 },
+      { id: 'on_4400', load: 'on', rpm: 4385.4, len: 0.191531, at: 5.415438 },
+    ],
+  },
+  f6: {
+    file: 'engine-flat6.m4a',
+    items: [
+      { id: 'idle', load: 'off', rpm: 1159.4, len: 1.241969, at: 0.12 },
+    ],
+  },
+  v12: {
+    file: 'engine-v12.m4a',
+    items: [
+      { id: 'idle', load: 'off', rpm: 1039.4, len: 0.923594, at: 0.12 },
+      { id: 'on_3500', load: 'on', rpm: 3480.4, len: 0.41375, at: 1.283594 },
+      { id: 'on_3650', load: 'on', rpm: 3643.7, len: 0.526938, at: 1.937344 },
+      { id: 'on_4250', load: 'on', rpm: 4259.9, len: 0.366219, at: 2.704281 },
+    ],
+  },
   fx: {
     file: 'effects.m4a',
     items: [

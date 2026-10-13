@@ -23,7 +23,7 @@ import { SAMPLE_PACKS } from './sound-samples.js';
 
 const SAMPLE_URL = `${import.meta.env?.BASE_URL ?? '/'}sounds/`;
 // Shown in the menu credits. Every recording is CC0 (tools/sounds/sources.mjs lists them).
-export const SOUND_CREDITS = 'Engine, turbo and tyre sounds: recordings by Chippy569, dezoris, ulose2piranha, editboy23, audible-edge, TiesWijnen, justVova, megashroom and reg7783 on Freesound.org (CC0)';
+export const SOUND_CREDITS = 'Engine, turbo and tyre sounds: recordings by Chippy569, dezoris, ulose2piranha, editboy23, PritzProductions, victormalloy, cheesepuff, audible-edge, TiesWijnen, justVova, megashroom and reg7783 on Freesound.org (CC0)';
 const MASTER_VOL = 0.6;
 const MUTE_KEY = 'driveHome.muted';
 const MAX_VOICES = 14; // simultaneous one-shots
@@ -737,16 +737,21 @@ const ENGINES = {
     rec: { pack: 'b4', idle: 720, red: 6400, lp: 6500, body: 2.5, presence: 0, turbo: 0, vol: 1.05 } },
   carnival: { voice: 'ice', idle: 30, red: 128, harm: 1.5, mix: [0.55, 0.25, 0.35], noise: 0.08, bright: 3.5, q: 0.8, drive: 1.2, boxer: 0, dip: 0.8, vol: 0.9,
     rec: { pack: 'i6', idle: 650, red: 6000, lp: 2400, body: 3, presence: -4, turbo: 0, vol: 0.85 } },
-  // Supercars: tuned from the same recordings, revving higher and brighter. A V12 fires like
-  // two straight sixes, a flat-plane V8 like two fours, so those packs stand in for them.
+  // Supercars: real engines of their kind, from standing cars revved by hand (no CC0 dyno pull
+  // of a supercar exists): a Lamborghini V12 and a Ferrari 360 flat-plane V8 (the McLaren's,
+  // and the Ferrari 296's: no CC0 V6 exists). They reach ~4300-4400 rpm, so each red is set
+  // where the top loop is pitched up at most ~1.35x; by firing rate (a V12 fires 6 times a
+  // turn, a V8 4) the tops still match or beat the stand-ins these cars used before. The 296
+  // revs higher and brighter than the McLaren. The 911 idles like a real Porsche flat six and
+  // revs on the boxer dyno pull (its rpm counts as a four's: 1740 = a six at 1160).
   revuelto: { voice: 'ice', idle: 40, red: 230, harm: 1.5, mix: [0.6, 0.42, 0.3], noise: 0.12, bright: 7.5, q: 3.2, drive: 3, boxer: 0, dip: 0.4, vol: 1.05,
-    rec: { pack: 'i6', idle: 1000, red: 9500, lp: 9500, body: 1, presence: 3.5, turbo: 0, vol: 1.1 } },
+    rec: { pack: 'v12', idle: 1040, red: 5200, lp: 9500, body: 1, presence: 4, turbo: 0, vol: 1.1 } },
   ferrari296: { voice: 'ice', idle: 40, red: 215, harm: 1.5, mix: [0.6, 0.4, 0.3], noise: 0.12, bright: 7, q: 3, drive: 2.8, boxer: 0, dip: 0.4, vol: 1,
-    rec: { pack: 'i6', idle: 950, red: 8500, lp: 9000, body: 0.5, presence: 3, turbo: 0.35, vol: 1.05 } },
+    rec: { pack: 'v8', idle: 1130, red: 6000, lp: 9500, body: 0, presence: 3, turbo: 0.3, vol: 1.05 } },
   porsche911: { voice: 'ice', idle: 36, red: 185, harm: 2, mix: [0.6, 0.3, 0.42], noise: 0.12, bright: 5.5, q: 2, drive: 2.4, boxer: 0.6, dip: 0.45, vol: 1.05,
-    rec: { pack: 'b4', idle: 900, red: 7200, lp: 7000, body: 2, presence: 1.5, turbo: 0.5, vol: 1.1 } },
+    rec: { pack: 'f6', idle: 1740, red: 7200, lp: 7000, body: 2, presence: 1.5, turbo: 0.5, vol: 1.1 } },
   mclaren750s: { voice: 'ice', idle: 42, red: 210, harm: 2, mix: [0.62, 0.36, 0.28], noise: 0.12, bright: 7, q: 2.6, drive: 2.6, boxer: 0, dip: 0.42, vol: 1,
-    rec: { pack: 'i4', idle: 1000, red: 8500, lp: 9500, body: 0.5, presence: 3, turbo: 0.45, vol: 1.1 } },
+    rec: { pack: 'v8', idle: 1130, red: 5400, lp: 7500, body: 2, presence: 0, turbo: 0.45, vol: 1.1 } },
   modelx: { voice: 'ev', f0: 70, fk: 24, cut: 2800, buzz: false, vol: 0.9, rec: { bed: 'ev', whine: 0.3, fk: 12 } },
   ebike: { voice: 'ev', f0: 210, fk: 30, cut: 1800, buzz: true, ticks: true, vol: 0.7, rec: { motor: 'ebike', whine: 0 } },
   bike: { voice: 'bike' },
@@ -766,6 +771,11 @@ const ENGINE_SETS = {
   i4: { pack: 'i4' }, // Mercedes 190E 2.3-16V inline four on a dyno
   b4: { pack: 'b4', offLp: 1300 }, // Subaru flat four: FR-S dyno pull, WRX idle
   i6: { pack: 'i6', idle: ['i4', 'idle', 4 / 6], offLp: 1300 }, // Supra 2JZ straight six
+  v8: { pack: 'v8', offLp: 1300 }, // Ferrari 360 flat-plane V8, standing, revved by hand
+  // Porsche flat six: a real Porsche idle; on throttle the boxer dyno pull (no CC0 recording of
+  // a flat six revving exists). A six at 1160 rpm fires as often as a four at 1740.
+  f6: { pack: 'b4', idle: ['f6', 'idle', 6 / 4], offLp: 1300 },
+  v12: { pack: 'v12', offLp: 1300 }, // Lamborghini V12 at a dealer, revved by hand
 };
 const XF_WIDTH = 0.7; // share of the rpm gap between two loops where both play
 

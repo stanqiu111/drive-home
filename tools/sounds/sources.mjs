@@ -18,6 +18,11 @@ export const SOURCES = {
   tesla: { id: 761685, author: 'justVova', page: 'https://freesound.org/people/justVova/sounds/761685/', title: 'Acceleration of an electric car', what: 'Tesla Model S Plaid at full throttle', preview: 'https://cdn.freesound.org/previews/761/761685_13088347-hq.mp3' },
   drill: { id: 390162, author: 'megashroom', page: 'https://freesound.org/people/megashroom/sounds/390162/', title: 'DeWalt 18V Cordless Combi Drill 170427_1452.wav', what: 'brushless electric motor spinning', preview: 'https://cdn.freesound.org/previews/390/390162_1830834-hq.mp3' },
   air: { id: 131302, author: 'reg7783', page: 'https://freesound.org/people/reg7783/sounds/131302/', title: 'release_air_pffft.wav', what: 'compressed-air line released (stands in for a turbo blow-off valve)', preview: 'https://cdn.freesound.org/previews/131/131302_2394357-hq.mp3' },
+  // Supercar engines. No CC0 dyno pull of a supercar exists, so these are standing cars revved
+  // by hand: loops come from the steady stretches (idle, holds, slow rises, the tops of revs).
+  ferrari_spider: { id: 241083, author: 'PritzProductions', page: 'https://freesound.org/people/PritzProductions/sounds/241083/', title: 'Ferrari 360 Spider - engine sound', what: 'Ferrari 360 Spider (3.6 flat-plane V8) standing, mic directly above the engine: idle, a slow rise, revs to ~4400 rpm (a voice at the very end is not used)', preview: 'https://cdn.freesound.org/previews/241/241083_3450345-hq.mp3' },
+  porsche_idle: { id: 113216, author: 'victormalloy', page: 'https://freesound.org/people/victormalloy/sounds/113216/', title: 'Porsche idle.aif', what: 'Porsche idling at ~1160 rpm (flat six by its firing pattern; the model is not given)', preview: 'https://cdn.freesound.org/previews/113/113216_137116-hq.mp3' },
+  lambo_dealer: { id: 112075, author: 'cheesepuff', page: 'https://freesound.org/people/cheesepuff/sounds/112075/', title: 'Lambo idle and rev.mp3', what: 'Lamborghini at a dealer, from a phone video (the model is not given; its harmonics fit a V12, most likely a Murcielago): idle and steady revs to ~4300 rpm', preview: 'https://cdn.freesound.org/previews/112/112075_682033-hq.mp3' },
 };
 
 // Engine loops. Each is `cycles` engine cycles (2 crank turns) centred at `t` seconds in the
@@ -58,6 +63,40 @@ export const PACKS = {
       { id: 'on_4300', load: 'on', src: 'six_dyno', t: 20.75, rpm: 4311, cycles: 16, extra: 3, range: [18.5, 22.7] },
       { id: 'on_5400', load: 'on', src: 'six_dyno', t: 22.48, rpm: 5400, cycles: 15, extra: 3, range: [21.2, 22.9] },
       { id: 'on_6900', load: 'on', src: 'six_dyno', t: 23.75, rpm: 6940, cycles: 17, extra: 3, range: [23.3, 24.9] },
+    ],
+  },
+  // Ferrari 360 flat-plane V8 (fires 4 times a turn). The rpm guesses come from the firing
+  // interval; a guess off by a whole firing makes the tracker lock onto 7 or 9 firings, so each
+  // loop was checked to have its strongest line at the 4th engine order (the firing rate).
+  v8: {
+    file: 'engine-v8.m4a',
+    loops: [
+      { id: 'idle', load: 'off', src: 'ferrari_spider', t: 19.4, rpm: 1120, cycles: 12, extra: 2, range: [18.55, 20.25], track: { cycles: 2.5, tol: 0.04 } },
+      { id: 'on_1600', load: 'on', src: 'ferrari_spider', t: 12.6, rpm: 1596, cycles: 16, extra: 2, range: [11.7, 14.1] },
+      { id: 'on_2400', load: 'on', src: 'ferrari_spider', t: 15.45, rpm: 2420, cycles: 14, extra: 2, range: [14.9, 15.8] },
+      { id: 'on_2800', load: 'on', src: 'ferrari_spider', t: 7.8, rpm: 2789, cycles: 18, extra: 3, range: [7.37, 8.23] },
+      { id: 'on_3700', load: 'on', src: 'ferrari_spider', t: 5.18, rpm: 3699, cycles: 5, extra: 1, range: [5.05, 5.3], track: { cycles: 2, tol: 0.06 } },
+      { id: 'on_4400', load: 'on', src: 'ferrari_spider', t: 8.63, rpm: 4446, cycles: 7, extra: 1, range: [8.5, 8.76], track: { cycles: 2, tol: 0.06 } },
+    ],
+  },
+  // Porsche flat six (fires 3 times a turn), idle only: no CC0 recording of a flat six revving
+  // was found (the same recordist's "Porsche Exhaust" barely leaves idle; its high "revs" are
+  // another sound), so the 911 revs on the boxer dyno pull.
+  f6: {
+    file: 'engine-flat6.m4a',
+    loops: [
+      { id: 'idle', load: 'off', src: 'porsche_idle', t: 12.0, rpm: 1166, cycles: 12, extra: 2, range: [10.5, 14.6], track: { cycles: 2.5, tol: 0.04 } },
+    ],
+  },
+  // Lamborghini V12 (fires 6 times a turn): strongest line at the 6th engine order. The revs
+  // hold at ~3500-4300 rpm; nothing steady lies between idle and there.
+  v12: {
+    file: 'engine-v12.m4a',
+    loops: [
+      { id: 'idle', load: 'off', src: 'lambo_dealer', t: 15.8, rpm: 1059, cycles: 8, extra: 1, range: [14.6, 16.9], track: { cycles: 2.5, tol: 0.04 } },
+      { id: 'on_3500', load: 'on', src: 'lambo_dealer', t: 36.89, rpm: 3510, cycles: 12, extra: 2, range: [36.5, 37.3] },
+      { id: 'on_3650', load: 'on', src: 'lambo_dealer', t: 42.38, rpm: 3715, cycles: 16, extra: 2, range: [41.9, 42.85] },
+      { id: 'on_4250', load: 'on', src: 'lambo_dealer', t: 50.62, rpm: 4188, cycles: 13, extra: 2, range: [50.2, 51.0] },
     ],
   },
 };

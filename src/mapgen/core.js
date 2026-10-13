@@ -761,22 +761,34 @@ export function rooflineQueries(pts, proj = GLOBAL_PROJ) {
   return out;
 }
 // Downloads them all (`parallel` queries at a time; results are kept in query order, so the
-// buildings come out in the same order however the downloads finish).
-export async function loadRooflines(pts, getJSON, { proj = GLOBAL_PROJ, parallel = 1, tick = () => {} } = {}) {
+// buildings come out in the same order however the downloads finish). A failed query stops
+// the others and throws, unless `skipFailed` (custom routes): then that box is left out and
+// the rest is kept; `missing` on the result counts the boxes left out, and it throws only if
+// every box failed.
+export async function loadRooflines(pts, getJSON, { proj = GLOBAL_PROJ, parallel = 1, tick = () => {}, skipFailed = false } = {}) {
   const queries = rooflineQueries(pts, proj);
   const results = new Array(queries.length);
   let next = 0;
   let done = 0;
+  let missing = 0;
+  let fatal = null;
   const worker = async () => {
-    while (next < queries.length) {
+    while (next < queries.length && !fatal) {
       const q = next++;
       const rows = [];
-      await sodaQuery('https://data.edmonton.ca/resource/jpxi-a9a5.json', 'the_geom,building_height', queries[q], getJSON, (r) => rows.push(...r));
+      try {
+        await sodaQuery('https://data.edmonton.ca/resource/jpxi-a9a5.json', 'the_geom,building_height', queries[q], getJSON, (r) => rows.push(...r));
+      } catch (e) {
+        if (!skipFailed) { fatal = e; return; }
+        missing++;
+      }
       results[q] = rows;
       tick(++done, queries.length);
     }
   };
   await Promise.all(Array.from({ length: Math.min(parallel, queries.length) }, worker));
+  if (fatal) throw fatal;
+  if (missing === queries.length) throw new Error('City building data unavailable');
   const seen = new Set();
   const out = [];
   for (const rows of results) {
@@ -793,6 +805,7 @@ export async function loadRooflines(pts, getJSON, { proj = GLOBAL_PROJ, parallel
       }
     }
   }
+  if (missing) out.missing = missing;
   return out;
 }
 // Zoning (Bylaw 20001 polygons) in the route's bounding box: zone codes decide a style
@@ -1045,13 +1058,16 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
   progress(0.1, 'Downloading the terrain');
   const gridLL = [];
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) gridLL.push(U(gx0 + i * CELL, gz0 + j * CELL));
-  const dem = await sampleDEM(gridLL);
+  const routeLL = pts.map(([x, z]) => U(x, z));
+  // One read of the terrain for the grid, the start and the route (the same pixels as three
+  // separate reads, so the same heights, without decoding the tiles three times).
+  const sampled = await sampleDEM([...gridLL, start, ...routeLL]);
+  const dem = sampled.slice(0, gridLL.length);
+  const elev0 = sampled[gridLL.length];
+  const routeDem = sampled.slice(gridLL.length + 1);
 
   progress(0.3, 'Shaping hills, bridges and overpasses');
   // Route elevation: smoothed DEM, straight lines across bridges.
-  const routeLL = pts.map(([x, z]) => U(x, z));
-  const elev0 = (await sampleDEM([start]))[0];
-  const routeDem = await sampleDEM(routeLL);
   let ry = routeDem.map((e) => e - elev0);
   ry = smoothArr(ry, 15);
   for (let i = 0; i < N; i++) {
@@ -1060,7 +1076,14 @@ export async function buildMapData(m, ptsGlobal, osm, io) {
     while (j < N && bridgeClean[j]) j++;
     const a = Math.max(0, i - 8);
     const b = Math.min(N - 1, j + 8);
-    for (let k = a; k <= b; k++) ry[k] = ry[a] + ((ry[b] - ry[a]) * (k - a)) / (b - a || 1);
+    // A custom route can start or end on a bridge (a place search for "High Level Bridge"
+    // lands mid-deck): the ground at that open end is the river or the valley floor, so the
+    // deck stays level with the end that is on land.
+    const openStart = i - 8 < 0 && j + 8 <= N - 1;
+    const openEnd = j + 8 > N - 1 && i - 8 >= 0;
+    const ya = openStart ? ry[b] : ry[a];
+    const yb = openEnd ? ry[a] : ry[b];
+    for (let k = a; k <= b; k++) ry[k] = ya + ((yb - ya) * (k - a)) / (b - a || 1);
     i = j;
   }
   ry = smoothArr(ry, 6);

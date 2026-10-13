@@ -5,6 +5,10 @@
 //
 //   node tools/dev/custom-routes.mjs           # all routes (about 2 minutes)
 //   node tools/dev/custom-routes.mjs 0 3       # just routes 0 and 3
+//   node tools/dev/custom-routes.mjs --game 5173
+//       also loads each map in the game (dev server on that port) and runs the landmark and
+//       brand road checks on it: the maps are put in public/maps for the run (as zzc<n>) and
+//       always taken out again.
 //
 // Maps go to tools/cache/custom-maps/ (not in git). Start and finish are public places;
 // never add anyone's home address here.
@@ -39,10 +43,14 @@ const P = {
   cityhall: ['Edmonton City Hall', [-113.490165, 53.545472]],
   zoo: ['Edmonton Valley Zoo', [-113.555627, 53.51096]],
   ram: ['Royal Alberta Museum', [-113.489081, 53.547148]],
+  walterdale: ['Walterdale Bridge', [-113.5017099, 53.5283861]], // starts on a bridge, then 97 Ave under the Legislature plaza
+  garneau: ['Garneau', [-113.525, 53.515]],
+  highlevel: ['High Level Bridge', [-113.5113467, 53.5296248]], // ends mid-bridge
 };
 const ROUTES = [
   ['wem', 'rogers'], ['clareview', 'windermere'], ['kingsway', 'southgate'], ['clareview', 'millwoods'], ['butterdome', 'expo'],
   ['lewis', 'commonwealth'], ['terwillegar', 'rogers'], ['castledowns', 'bonniedoon'], ['meadows', 'cityhall'], ['zoo', 'ram'],
+  ['walterdale', 'southgate'], ['garneau', 'highlevel'],
 ];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -58,7 +66,10 @@ async function getJSON(url) {
 }
 
 fs.mkdirSync(OUT, { recursive: true });
-const pick = process.argv.slice(2).map(Number);
+const args = process.argv.slice(2);
+const gameAt = args.indexOf('--game');
+const gamePort = gameAt >= 0 ? args[gameAt + 1] || '5173' : null;
+const pick = args.filter((a, i) => /^\d+$/.test(a) && (gameAt < 0 || i !== gameAt + 1)).map(Number);
 const todo = ROUTES.map((r, i) => [i, r]).filter(([i]) => !pick.length || pick.includes(i));
 for (const f of fs.readdirSync(OUT)) if (f.endsWith('.json') && !pick.length) fs.rmSync(path.join(OUT, f));
 for (const [i, [a, b]] of todo) {
@@ -87,4 +98,33 @@ try {
   execFileSync(process.execPath, [path.join(ROOT, 'tools/check-roads.mjs'), '--dir', OUT], { stdio: 'inherit' });
 } catch {
   process.exitCode = 1;
+}
+
+// In the game: landmarks and brand sites must keep off the driven road on custom maps too.
+if (gamePort) {
+  const MAPS = path.join(ROOT, 'public/maps');
+  const indexFile = path.join(MAPS, 'index.json');
+  const indexText = fs.readFileSync(indexFile, 'utf8');
+  const ids = [];
+  try {
+    const index = JSON.parse(indexText);
+    for (const f of fs.readdirSync(OUT).filter((n) => n.endsWith('.json')).sort()) {
+      const id = `zzc${f.split('-')[0]}`;
+      const data = JSON.parse(fs.readFileSync(path.join(OUT, f), 'utf8'));
+      fs.writeFileSync(path.join(MAPS, `${id}.json`), JSON.stringify({ ...data, id }));
+      index.push({ id, name: f.replace(/\.json$/, ''), from: 'Summerside', km: 1, poly: [[0, 0], [1, 1]], landmarks: [], streets: [], signals: 0, curves: 0, bridgeM: 0, highwayM: 0, climb: 0 });
+      ids.push(id);
+    }
+    fs.writeFileSync(indexFile, JSON.stringify(index));
+    for (const tool of ['check-landmarks.mjs', 'check-brands.mjs']) {
+      try {
+        execFileSync(process.execPath, [path.join(ROOT, 'tools/dev', tool), gamePort, ids.join(',')], { stdio: 'inherit' });
+      } catch {
+        process.exitCode = 1;
+      }
+    }
+  } finally {
+    fs.writeFileSync(indexFile, indexText);
+    for (const id of ids) fs.rmSync(path.join(MAPS, `${id}.json`), { force: true });
+  }
 }

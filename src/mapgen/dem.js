@@ -7,6 +7,7 @@ import proj4 from 'proj4';
 
 proj4.defs('EPSG:3979', '+proj=lcc +lat_0=49 +lon_0=-95 +lat_1=49 +lat_2=77 +x_0=0 +y_0=0 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs');
 const DEM_URL = 'https://canelevation-dem.s3.ca-central-1.amazonaws.com/mrdem-30/mrdem-30-dtm.tif';
+const toLcc = proj4('EPSG:4326', 'EPSG:3979'); // built once: per-point proj4() calls rebuild it
 const arrMin = (a) => a.reduce((m, v) => (v < m ? v : m), Infinity);
 const arrMax = (a) => a.reduce((m, v) => (v > m ? v : m), -Infinity);
 let demImage;
@@ -32,7 +33,7 @@ async function sampleOnce(points) {
   }
   const [ox, oy] = demImage.getOrigin();
   const [rx, ry] = demImage.getResolution();
-  const xy = points.map(([lon, lat]) => proj4('EPSG:4326', 'EPSG:3979', [lon, lat]));
+  const xy = points.map(([lon, lat]) => toLcc.forward([lon, lat]));
   const px = xy.map(([x]) => (x - ox) / rx - 0.5);
   const py = xy.map(([, y]) => (y - oy) / ry - 0.5);
   const x0 = Math.floor(arrMin(px)) - 1;

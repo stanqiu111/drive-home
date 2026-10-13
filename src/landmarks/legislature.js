@@ -237,6 +237,19 @@ export function build(ctx) {
     add('pave', mergeVertices(new THREE.ExtrudeGeometry(sh, { depth: 1.65, bevelEnabled: false })).rotateX(-Math.PI / 2).translate(0, -1.5, 0));
   }
   box('pave', -24, 24, -145, -23, -1.5, DECK);
+  // 97 Ave really runs in a tunnel under the plaza, but the game drives it at plaza level, so
+  // a custom route along it must not meet the pools or the jets: any that the driven road
+  // passes through (ctx.route, see _example.js) is left out. Built-in routes never pass here.
+  const onDriven = (x0, x1, z0, z1) => {
+    if (!ctx.route) return false;
+    for (let x = x0; x <= x1 + 1e-6; x += 1.5) {
+      for (let z = z0; z <= z1 + 1e-6; z += 1.5) {
+        const r = ctx.route(x + AX, z);
+        if (r && !r.beyond && Math.abs(r.y - DECK) < 4 && r.lat > r.left - 0.5 && r.lat < r.right + 0.5) return true;
+      }
+    }
+    return false;
+  };
   // Reflecting pools with a raised stone coping; fountain jets in the near pool.
   const pool = (z0, z1) => {
     const y0 = DECK, y1 = DECK + 0.45;
@@ -244,9 +257,8 @@ export function build(ctx) {
     box('coping', -9.3, -8.8, z0, z1, y0, y1); box('coping', 8.8, 9.3, z0, z1, y0, y1);
     add('water', new THREE.PlaneGeometry(17.6, z1 - z0).rotateX(-Math.PI / 2).translate(0, y1 - 0.12, (z0 + z1) / 2));
   };
-  pool(-110, -52.3);
-  pool(-136.1, -118.7);
-  for (const z of [-60, -70, -80, -90, -100]) cyl('jet', 0, z, 0.2, DECK + 0.3, DECK + 2.1, 6, true, 0.1);
+  for (const [z0, z1] of [[-110, -52.3], [-136.1, -118.7]]) if (!onDriven(-9.3, 9.3, z0 - 0.5, z1 + 0.5)) pool(z0, z1);
+  for (const z of [-60, -70, -80, -90, -100]) if (!onDriven(-0.3, 0.3, z - 0.3, z + 0.3)) cyl('jet', 0, z, 0.2, DECK + 0.3, DECK + 2.1, 6, true, 0.1);
   // Lawns: the four garden quadrants around the building (polygons from OSM, inset so the
   // ring road around the grounds stays clear). Shape x = east, shape y = -z (north).
   const lawn = (pts) => {

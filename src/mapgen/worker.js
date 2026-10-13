@@ -86,9 +86,12 @@ async function build({ id, name, from, to, start, dest, coords }) {
       throw new Error('The terrain service (Natural Resources Canada) did not answer. Try again in a moment.');
     }),
     rooflines: (mm, p) => loadRooflines(p, getJSON, {
-      proj, parallel: 4,
+      proj, parallel: 4, skipFailed: true,
       tick: (d, n) => progress(overall(0.5 + 0.25 * (d / n)), `Downloading the buildings (${d}/${n})`),
-    }).catch(() => { notes.push('City building data was unavailable: buildings come from OpenStreetMap.'); return []; }),
+    }).then((list) => {
+      if (list.missing) notes.push('Some City building data was unavailable: a few stretches have OpenStreetMap buildings instead.');
+      return list;
+    }, () => { notes.push('City building data was unavailable: buildings come from OpenStreetMap.'); return []; }),
     zoning: (mm, p) => loadZoning(p, getJSON, { proj }).catch(() => { notes.push('City zoning was unavailable.'); return []; }),
   });
   out.custom = { to, created: Date.now(), ...(notes.length ? { notes } : {}) };

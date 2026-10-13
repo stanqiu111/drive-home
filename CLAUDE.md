@@ -216,9 +216,9 @@ The owner plays on an M2 MacBook Air (fanless; Retina screen at 2x plus an exter
 - **Keep the look**: before/after screenshots of the same spots must match. Pixel-diff full screenshots taken at the same resolution (set `__game.renderer.setPixelRatio(devicePixelRatio)` first in the new code).
 - Things that would break this: one mesh for a whole map (cut big things into ~500 m pieces), building or compiling during a race, `backdrop-filter` on HUD panels, writing the HUD every frame, adding or removing lights at run time.
 
-## Status and handoff (2026-10-08)
+## Status and handoff (2026-10-13)
 
-The owner switched computers mid-task. This section is the compressed history and the to-do list; delete items as they get done.
+This section is the compressed history and the to-do list; delete items as they get done.
 
 ### Where things are
 
@@ -228,12 +228,22 @@ The owner switched computers mid-task. This section is the compressed history an
   2. engines, turbo, blow-off and tyre squeal from real CC0 recordings (see "Sounds");
   3. flying stays under the High Level Bridge's upper deck and under overpasses (`clearance.js`);
   4. the road at the end of Snow Valley is visible again.
-- Work in progress goes on a branch, and goes live only after the owner checks it locally and says so.
+- **On branch `wip/oct11-routes-brands-cars`, NOT live yet** (the owner's 2026-10-10 requests; waiting for the owner to try it locally and approve the deploy):
+  1. custom routes: any two places inside Edmonton, built in the browser with a progress bar (see "Custom routes"), on the shared builder `src/mapgen/` and the OpenStreetMap tiles in `public/osm/`;
+  2. all six team cars rebuilt from the makers' official images and specifications;
+  3. 11 new landmarks (West Edmonton Mall, Rogers Place, City Hall, …);
+  4. brand buildings: gas stations, chain restaurants, banks, big boxes, hotels, dealers (`brands.js`, `brand-sites.js`);
+  5. a Supercars row in the garage (Revuelto, 296 GTB, 911 Turbo S, 750S) with real recorded engines;
+  6. road-line fixes found on new routes (folds at sharp corners, whole junctions, full-width stop lines, signal poles past the crosswalk), checked on 10 custom routes across the city (`tools/dev/custom-routes.mjs`);
+  7. two code reviews' confirmed findings fixed (custom-route screen, address search rules, tiles at the area's edge, terrain read retries).
+- Work in progress goes on a branch, and goes live only after the owner checks it locally and says so. Helpers (sub-agents) work in git worktrees under `.claude/worktrees/` and their branches are squash-merged (no co-author lines); usage limits often stop them mid-task, so resume them and their saved commits.
 
 ### Owner to-dos
 
 - If not already done since 2026-10-07: paste all of `supabase/schema.sql` into Supabase → SQL Editor and run it. Its map list now includes `snowvalley` and `refinery`; without it, posting times on those two maps fails.
 - `menu.png` and `race.png` in the project folder are old screenshots and can be deleted.
+- Confirm the teammates' car model years: the cars now follow the current designs (Lexus IS 2026+ facelift front, Kia Carnival 2025 facelift lights, Legacy 2025 black window frames, CR-V and Accord 2023+). An older car looks different at the front or rear.
+- Listen to the supercar engines (and the team cars) in `/sound-studio.html` and a drive: they're real recordings, but nobody has heard them yet.
 
 ### Unfinished work, in order
 

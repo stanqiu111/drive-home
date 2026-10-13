@@ -296,7 +296,7 @@ async function selectMap(id) {
     mysteryBoxes.setRoute(route);
     ending.setRoute(route, world.heightAt, mapInfo().cheer, mapInfo().ending);
     renderer.compile(ending.root, camera, scene);
-    ui.credits.textContent = `${data.credits} · ${SOUND_CREDITS}`;
+    ui.credits.textContent = `${data.credits} · Routes: OSRM (project-osrm.org) · ${SOUND_CREDITS}`;
     S.landmarks = (data.landmarks || []).map((l) => ({ ...l, shown: false }));
     reset();
     S.mode = 'menu';
@@ -305,6 +305,22 @@ async function selectMap(id) {
     if (e instanceof BuildCancelled || stale()) return;
     console.error(e);
     ui.loading.textContent = `Could not load the map: ${e.message}`;
+    // Back to the map that is still on screen, so Start, the menu and Delete keep working; a
+    // custom route whose data is gone (deleted in another tab) leaves the menu.
+    if (e.gone) {
+      forgetCustomRoute(id);
+      deleteCustomRoute(id).catch(() => {}); // its menu entry is all that's left
+    }
+    if (world) {
+      prefs.map = world.group.name.replace(/^world:/, '');
+      if (!MAPS.some((m) => m.id === prefs.map)) prefs.map = 'home';
+      savePrefs();
+      S.mode = 'menu';
+      renderMenu();
+      setTimeout(() => { if (token === loadToken) ui.loading.classList.remove('show'); }, 6000);
+    } else if (e.gone) {
+      setTimeout(() => selectMap('home'), 1500);
+    }
     return;
   }
   ui.loading.classList.remove('show');
@@ -581,7 +597,13 @@ progress.onChange((fresh) => {
 
 ui.mapList.addEventListener('click', (e) => {
   if (e.target.closest('[data-new-route]')) {
-    openCustomBuilder({ onAdded: (meta) => { MAPS.push(customEntry(meta)); selectMap(meta.id); } });
+    openCustomBuilder({
+      onAdded: (meta, dropped = []) => {
+        for (const old of dropped) forgetCustomRoute(old.id); // past the cap, the oldest go
+        MAPS.push(customEntry(meta));
+        selectMap(meta.id);
+      },
+    });
     return;
   }
   const id = e.target.closest('[data-map]')?.dataset.map;
@@ -590,14 +612,19 @@ ui.mapList.addEventListener('click', (e) => {
 // Deleting a custom route (the link sits in the route's detail panel).
 document.addEventListener('click', async (e) => {
   const id = e.target.closest?.('[data-del-route]')?.dataset.delRoute;
-  if (!id || S.mode === 'loading') return;
+  if (!id) return;
   const m = MAPS.find((x) => x.id === id);
   if (!m || !confirm(`Delete your route "${m.name}"? Its best time is deleted too.`)) return;
   await deleteCustomRoute(id).catch(() => {});
-  MAPS.splice(MAPS.indexOf(m), 1);
-  try { localStorage.removeItem(bestKey(id)); } catch { /* storage unavailable */ }
-  if (prefs.map === id) selectMap('home'); else renderMenu();
+  forgetCustomRoute(id);
+  if (prefs.map === id) selectMap('home'); else renderMenu(); // selectMap cancels a load in progress
 });
+// Takes a custom route off the menu (deleted, or dropped past the 12-route cap).
+function forgetCustomRoute(id) {
+  const k = MAPS.findIndex((x) => x.id === id);
+  if (k >= 0) MAPS.splice(k, 1);
+  try { localStorage.removeItem(bestKey(id)); } catch { /* storage unavailable */ }
+}
 ui.paint.addEventListener('click', (e) => {
   const p = e.target.closest('[data-paint]')?.dataset.paint;
   if (!p) return;

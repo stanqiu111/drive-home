@@ -6,8 +6,9 @@
 // Nominatim, OSRM) and never to the leaderboard: custom routes have no online board.
 import { insideEdmonton, EDMONTON_BBOX, CUSTOM_MIN_KM, CUSTOM_MAX_KM, osrmRouteUrl } from './mapgen/edmonton.js';
 
+export const MAX_SAVED_ROUTES = 12;
 export const isCustomId = (id) => typeof id === 'string' && id.startsWith('custom-');
-const MAX_SAVED = 12;
+const MAX_SAVED = MAX_SAVED_ROUTES;
 
 // ---------- storage (IndexedDB: small entries for the menu, map files apart) ----------
 const DB_NAME = 'driveHome';
@@ -47,7 +48,7 @@ export async function listCustomRoutes() {
 }
 export async function loadCustomRoute(id) {
   const data = await run([DATA], 'readonly', (tx) => tx.objectStore(DATA).get(id));
-  if (!data) throw new Error('This custom route is no longer saved on this device.');
+  if (!data) throw Object.assign(new Error('That route is no longer saved on this device.'), { gone: true });
   return data;
 }
 export async function deleteCustomRoute(id) {
@@ -56,13 +57,19 @@ export async function deleteCustomRoute(id) {
     tx.objectStore(DATA).delete(id);
   });
 }
+// Saves a new route; past MAX_SAVED the oldest ones go, in the same transaction (so a failed
+// save loses nothing). Returns the menu entries of the routes it dropped.
 async function saveCustomRoute(meta, data) {
-  const old = await listCustomRoutes();
-  for (const m of old.slice(MAX_SAVED - 1)) await deleteCustomRoute(m.id);
+  const dropped = (await listCustomRoutes()).slice(MAX_SAVED - 1);
   await run([META, DATA], 'readwrite', (tx) => {
     tx.objectStore(META).put(meta);
     tx.objectStore(DATA).put(data, meta.id);
+    for (const m of dropped) {
+      tx.objectStore(META).delete(m.id);
+      tx.objectStore(DATA).delete(m.id);
+    }
   });
+  return dropped;
 }
 
 // ---------- finding places ----------
@@ -84,7 +91,21 @@ async function photon(text, signal) {
   if (!r.ok) throw new Error(`search ${r.status}`);
   return (await r.json()).features.map(photonPlace);
 }
+// Nominatim's rules: at most one request a second, and cache the answers.
+const nominatimCache = new Map();
+let nominatimLast = 0;
 async function nominatim(text, signal) {
+  const key = text.toLowerCase();
+  if (nominatimCache.has(key)) return nominatimCache.get(key);
+  const wait = nominatimLast + 1100 - Date.now();
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+  if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+  nominatimLast = Date.now();
+  const list = await nominatimFetch(text, signal);
+  nominatimCache.set(key, list);
+  return list;
+}
+async function nominatimFetch(text, signal) {
   const [w, s, e, n] = EDMONTON_BBOX;
   const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&bounded=1&viewbox=${w},${n},${e},${s}&q=${encodeURIComponent(text)}`;
   const r = await fetch(url, { signal });
@@ -106,13 +127,15 @@ async function searchPlaces(text, signal, { fallback = false } = {}) {
     return insideEdmonton(lon, lat) ? [{ label: `${lat.toFixed(5)}, ${lon.toFixed(5)}`, detail: 'Map point', short: 'Map point', lon, lat, kind: '' }] : [];
   }
   let list;
+  let asked = false; // Nominatim at most once per search
   try {
     list = await photon(q, signal);
   } catch (e) {
     if (e.name === 'AbortError' || !fallback) throw e;
+    asked = true;
     list = await nominatim(q, signal);
   }
-  if (!list.length && fallback) list = await nominatim(q, signal).catch(() => []);
+  if (!list.length && fallback && !asked) list = await nominatim(q, signal).catch(() => []);
   const seen = new Set();
   return list.filter((p) => {
     const k = `${p.label}|${p.lon.toFixed(4)}|${p.lat.toFixed(4)}`;
@@ -163,7 +186,7 @@ function markup() {
       <p id="cr-msg" class="cr-msg" role="status"></p>
       <button class="go-btn" id="cr-build" disabled>Build this map</button>
       <button class="link-btn" id="cr-close" type="button">Back to the menu</button>
-      <p class="cr-fine">Places are looked up with OpenStreetMap's free search and saved only on this device. Custom routes have no online leaderboard.</p>
+      <p class="cr-fine">As you type, places are looked up with komoot’s Photon search (OpenStreetMap’s Nominatim when you press Enter). The start and finish go to the OSRM route planner, and the area along the route is downloaded from the City of Edmonton and Natural Resources Canada. Your routes are saved only on this device and have no online leaderboard.</p>
     </div>`;
   document.body.appendChild(el);
   return el;
@@ -233,15 +256,22 @@ function wireField(which) {
       results = await searchPlaces(q, ctrl.signal, { fallback });
       active = results.length ? 0 : -1;
       if (document.activeElement === input || fallback) show();
+      if (results.length && $('cr-msg').classList.contains('bad')) setMsg('');
       return results;
     } catch (e) {
-      if (e.name !== 'AbortError') setMsg('The address search is not answering. Check the connection and try again.', true);
+      if (e.name !== 'AbortError') {
+        setMsg(fallback ? 'The address search is not answering. Check the connection and try again.'
+          : 'Suggestions aren’t loading right now. Type the place and press Enter to search.', true);
+      }
       return [];
     }
   };
   input.addEventListener('input', () => {
     state[which] = null;
     state.route = null;
+    state.plan++; // a route still on its way is for the old places
+    results = []; // Enter must search what the field says now
+    close();
     updateButton();
     clearTimeout(timer);
     timer = setTimeout(() => search(false), 300);
@@ -254,6 +284,7 @@ function wireField(which) {
       show();
     } else if (e.key === 'Enter') {
       e.preventDefault();
+      if (e.repeat) return; // a held key would search again and again
       clearTimeout(timer);
       if (list.classList.contains('show') && results[active]) choose(results[active]);
       else {
@@ -273,14 +304,19 @@ function wireField(which) {
   });
 }
 
+// "Build this map" once the drive is planned; "Plan the drive again" when planning failed.
 function updateButton() {
   const btn = $('cr-build');
-  btn.disabled = !(state.from && state.to && state.route) || state.building;
+  const retry = !!(state.from && state.to && !state.route && !state.planning && state.planFailed);
+  btn.disabled = state.building || !(state.from && state.to && (state.route || retry));
+  if (!state.building) btn.textContent = retry ? 'Plan the drive again' : 'Build this map';
   $('cr-name-row').hidden = !state.route;
   if (!state.route) $('cr-preview').innerHTML = '';
 }
 
 async function planRoute() {
+  state.route = null; // Build waits for the answer for these two places
+  state.planFailed = false;
   updateButton();
   if (!state.from || !state.to) return;
   const { from, to } = state;
@@ -290,8 +326,10 @@ async function planRoute() {
   }
   setMsg('Planning the drive…');
   const token = ++state.plan;
+  state.planning = true;
   try {
     const r = await fetch(osrmRouteUrl([from.lon, from.lat], [to.lon, to.lat]));
+    if (!r.ok) throw new Error(`planner ${r.status}`); // busy or down: worth trying again
     const j = await r.json();
     if (token !== state.plan) return;
     if (!j.routes?.length) throw new Error('No driving route was found between those two places.');
@@ -303,11 +341,17 @@ async function planRoute() {
     $('cr-preview').innerHTML = `${previewSvg(route.geometry.coordinates)}
       <p>${km.toFixed(1)} km · about ${Math.max(1, Math.round(route.duration / 60))} min in normal traffic</p>`;
     $('cr-name').value = `${from.short} → ${to.short}`.slice(0, 64);
-    setMsg('');
+    const saved = await listCustomRoutes();
+    if (token !== state.plan) return;
+    setMsg(saved.length >= MAX_SAVED ? `You have ${MAX_SAVED} routes saved: building this one replaces the oldest, “${saved[saved.length - 1].name}”.` : '');
   } catch (e) {
     if (token !== state.plan) return;
     state.route = null;
-    setMsg(e.message.startsWith('That') || e.message.startsWith('No driving') ? e.message : 'The route planner is not answering. Try again in a moment.', true);
+    const known = e.message.startsWith('That') || e.message.startsWith('No driving');
+    state.planFailed = !known;
+    setMsg(known ? e.message : 'The route planner is not answering. Wait a moment and press “Plan the drive again”.', true);
+  } finally {
+    if (token === state.plan) state.planning = false;
   }
   updateButton();
 }
@@ -316,7 +360,7 @@ function setBusy(on) {
   state.building = on;
   for (const id of ['cr-from', 'cr-to', 'cr-name']) $(id).disabled = on;
   $('cr-progress').hidden = !on;
-  $('cr-build').textContent = on ? 'Building…' : 'Build this map';
+  if (on) $('cr-build').textContent = 'Building…';
   $('cr-close').textContent = on ? 'Cancel' : 'Back to the menu';
   updateButton();
 }
@@ -342,8 +386,9 @@ function build() {
     } else if (msg.type === 'done') {
       done();
       const meta = { ...msg.meta, custom: true, created: Date.now(), from: from.short, to: to.short, ending: endingFor(to), ...(msg.out.custom?.notes ? { notes: msg.out.custom.notes } : {}) };
+      let dropped;
       try {
-        await saveCustomRoute(meta, msg.out);
+        dropped = await saveCustomRoute(meta, msg.out);
       } catch {
         setBusy(false);
         setMsg('The map was built but this browser would not save it (private window or storage full).', true);
@@ -352,7 +397,7 @@ function build() {
       setBusy(false);
       closeBuilder();
       resetForm(); // the next "New route" starts empty
-      state.onAdded(meta);
+      state.onAdded(meta, dropped);
     } else {
       done();
       setBusy(false);
@@ -368,7 +413,7 @@ function build() {
 }
 
 function resetForm() {
-  Object.assign(state, { from: null, to: null, route: null });
+  Object.assign(state, { from: null, to: null, route: null, planning: false, planFailed: false });
   for (const id of ['cr-from', 'cr-to', 'cr-name']) $(id).value = '';
   setMsg('');
   updateButton();
@@ -382,15 +427,18 @@ function closeBuilder() {
 
 export const customBuilderOpen = () => !!screen?.classList.contains('show');
 
-// Opens the builder. onAdded(meta) is called with the new route's menu entry once its map
-// is saved.
+// Opens the builder. onAdded(meta, dropped) is called with the new route's menu entry once
+// its map is saved, and the entries of the oldest routes it replaced (at most MAX_SAVED).
 export function openCustomBuilder({ onAdded }) {
   if (!screen) {
     screen = markup();
-    state = { from: null, to: null, route: null, plan: 0, building: false, worker: null, onAdded };
+    state = { from: null, to: null, route: null, plan: 0, planning: false, planFailed: false, building: false, worker: null, onAdded };
     wireField('from');
     wireField('to');
-    $('cr-build').addEventListener('click', () => { if (!$('cr-build').disabled) build(); });
+    $('cr-build').addEventListener('click', () => {
+      if ($('cr-build').disabled) return;
+      if (state.route) build(); else planRoute();
+    });
     $('cr-close').addEventListener('click', () => {
       if (state.building) {
         closeBuilder();

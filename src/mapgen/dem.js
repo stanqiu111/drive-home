@@ -11,8 +11,21 @@ const arrMin = (a) => a.reduce((m, v) => (v < m ? v : m), Infinity);
 const arrMax = (a) => a.reduce((m, v) => (v > m ? v : m), -Infinity);
 let demImage;
 
-// points: [[lon, lat]] → elevations in metres (bilinear).
+// points: [[lon, lat]] → elevations in metres (bilinear). A dropped connection to the
+// bucket is retried twice, reopening the file.
 export async function sampleDEM(points) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await sampleOnce(points);
+    } catch (e) {
+      demImage = null;
+      if (attempt >= 2) throw e;
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+  }
+}
+
+async function sampleOnce(points) {
   if (!demImage) {
     const tif = await fromUrl(DEM_URL);
     demImage = await tif.getImage();

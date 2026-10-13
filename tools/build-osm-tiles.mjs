@@ -89,45 +89,56 @@ for await (const item of createOSMStream(PBF, { withTags: { node: nodeKeys, way:
     const rail = !kind && isRail(t);
     const poi = !kind && !rail && isPoi(t);
     if (!kind && !rail && !poi) continue;
-    const c = [];
-    let ok = true;
+    // The way's nodes, in runs inside the covered area. A road or railway that leaves the
+    // area keeps each part inside it (as its own way, id × 1000 + part); a closed outline
+    // (building, area, place) is all or nothing.
+    const runs = [[]];
     for (const ref of item.refs) {
       const k = find(ref);
-      if (k < 0) { ok = false; break; }
-      c.push(lon7[k], lat7[k]);
+      if (k < 0) { if (runs[runs.length - 1].length) runs.push([]); continue; }
+      runs[runs.length - 1].push(lon7[k], lat7[k]);
     }
-    if (!ok || c.length < 4) continue; // leaves the covered area (or degenerate)
-    if (poi) {
-      // A place mapped as an area (a gas station forecourt, a mall's grounds): its centre.
-      let sx = 0;
-      let sy = 0;
-      const m = c.length / 2 - (c[0] === c[c.length - 2] && c[1] === c[c.length - 1] ? 1 : 0);
-      for (let k = 0; k < m; k++) { sx += c[2 * k]; sy += c[2 * k + 1]; }
-      const lo = Math.round(sx / m);
-      const la = Math.round(sy / m);
-      tile(tileKey(...tileOf(lo / 1e7, la / 1e7))).pois.push([-item.id, lo, la, pick(t, POI_KEYS)]);
-      counts.pois++;
-      continue;
+    const whole = runs.length === 1;
+    const parts = whole ? runs : (kind === 'road' || rail ? runs.filter((r) => r.length >= 4) : []);
+    for (const [part, c] of parts.entries()) {
+      if (c.length < 4) continue; // degenerate
+      addWay(whole ? item.id : item.id * 1000 + part, t, c, kind, rail, poi);
     }
-    const tags = rail ? pick(t, RAIL_KEYS) : pick(t, WAY_KEYS);
-    counts[rail ? 'rail' : kind]++;
-    // Every tile a segment passes through (sampled every ~100 m).
-    const keys = new Set();
-    for (let k = 0; k < c.length; k += 2) {
-      keys.add(tileKey(...tileOf(c[k] / 1e7, c[k + 1] / 1e7)));
-      if (k + 2 >= c.length) break;
-      const dLon = (c[k + 2] - c[k]) / 1e7;
-      const dLat = (c[k + 3] - c[k + 1]) / 1e7;
-      const steps = Math.ceil(Math.hypot(dLon * 66000, dLat * 111000) / 100);
-      for (let s = 1; s < steps; s++) keys.add(tileKey(...tileOf(c[k] / 1e7 + (dLon * s) / steps, c[k + 1] / 1e7 + (dLat * s) / steps)));
-    }
-    const d = c.slice();
-    for (let k = c.length - 2; k >= 2; k -= 2) { d[k] = c[k] - c[k - 2]; d[k + 1] = c[k + 1] - c[k - 1]; }
-    const way = [item.id, tags, d];
-    for (const key of keys) tile(key).ways.push(way);
   } else if (item.type === 'relation') {
     break; // relations come last; nothing more to read
   }
+}
+
+// Puts one way (or a place's centre) into every tile it touches.
+function addWay(id, t, c, kind, rail, poi) {
+  if (poi) {
+    // A place mapped as an area (a gas station forecourt, a mall's grounds): its centre.
+    let sx = 0;
+    let sy = 0;
+    const m = c.length / 2 - (c[0] === c[c.length - 2] && c[1] === c[c.length - 1] ? 1 : 0);
+    for (let k = 0; k < m; k++) { sx += c[2 * k]; sy += c[2 * k + 1]; }
+    const lo = Math.round(sx / m);
+    const la = Math.round(sy / m);
+    tile(tileKey(...tileOf(lo / 1e7, la / 1e7))).pois.push([-id, lo, la, pick(t, POI_KEYS)]);
+    counts.pois++;
+    return;
+  }
+  const tags = rail ? pick(t, RAIL_KEYS) : pick(t, WAY_KEYS);
+  counts[rail ? 'rail' : kind]++;
+  // Every tile a segment passes through (sampled every ~100 m).
+  const keys = new Set();
+  for (let k = 0; k < c.length; k += 2) {
+    keys.add(tileKey(...tileOf(c[k] / 1e7, c[k + 1] / 1e7)));
+    if (k + 2 >= c.length) break;
+    const dLon = (c[k + 2] - c[k]) / 1e7;
+    const dLat = (c[k + 3] - c[k + 1]) / 1e7;
+    const steps = Math.ceil(Math.hypot(dLon * 66000, dLat * 111000) / 100);
+    for (let s = 1; s < steps; s++) keys.add(tileKey(...tileOf(c[k] / 1e7 + (dLon * s) / steps, c[k + 1] / 1e7 + (dLat * s) / steps)));
+  }
+  const d = c.slice();
+  for (let k = c.length - 2; k >= 2; k -= 2) { d[k] = c[k] - c[k - 2]; d[k + 1] = c[k + 1] - c[k - 1]; }
+  const way = [id, tags, d];
+  for (const key of keys) tile(key).ways.push(way);
 }
 log(`  ${n} nodes in the area; kept ${JSON.stringify(counts)}`);
 

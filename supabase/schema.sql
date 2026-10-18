@@ -13,6 +13,10 @@ create table if not exists public.player_progress (
 alter table public.player_progress add column if not exists name text
   check (name is null or char_length(btrim(name)) between 1 and 16);
 create unique index if not exists player_name_unique on public.player_progress (lower(btrim(name)));
+-- Cap the achievement list's total size too, not just its item count.
+alter table public.player_progress drop constraint if exists player_progress_achievements_size;
+alter table public.player_progress add constraint player_progress_achievements_size
+  check (pg_column_size(achievements) < 4000) not valid;
 
 -- A name can be picked once and never changed.
 create or replace function public.lock_player_name() returns trigger language plpgsql as $$
@@ -54,15 +58,40 @@ alter table public.scores drop constraint if exists scores_map_check;
 alter table public.scores add constraint scores_map_check
   check (map in ('home', 'windermere', 'sherwood', 'burger', 'beachclub', 'noodle', 'snowvalley', 'refinery'));
 create index if not exists scores_map_time on public.scores (map, time_ms);
+create index if not exists scores_user_map on public.scores (user_id, map);
+
+-- When each player last posted a time. Only stamp_score() touches it: no policies, so clients can't.
+create table if not exists public.score_limits (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  last_post timestamptz not null
+);
+alter table public.score_limits enable row level security;
+revoke all on public.score_limits from anon, authenticated;
 
 -- Scores always carry the poster's account and its fixed name, whatever the client sends.
+-- Limits, so a script can't fill the free database (the leaderboard shows only best times):
+--   at most one post every 10 seconds per player (the shortest race takes longer);
+--   only each player's best time per map is kept: a slower time is skipped, a faster one replaces it.
 create or replace function public.stamp_score() returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  best integer;
 begin
   new.user_id := auth.uid();
   select p.name into new.name from public.player_progress p where p.user_id = auth.uid();
   if new.user_id is null or new.name is null then
     raise exception 'pick a player name before posting a time';
   end if;
+  insert into public.score_limits as l (user_id, last_post) values (new.user_id, now())
+    on conflict (user_id) do update set last_post = excluded.last_post
+    where l.last_post <= now() - interval '10 seconds';
+  if not found then
+    raise exception 'too many times posted, wait a few seconds';
+  end if;
+  select min(s.time_ms) into best from public.scores s where s.user_id = new.user_id and s.map = new.map;
+  if best <= new.time_ms then
+    return null;
+  end if;
+  delete from public.scores s where s.user_id = new.user_id and s.map = new.map;
   return new;
 end $$;
 drop trigger if exists stamp_score on public.scores;

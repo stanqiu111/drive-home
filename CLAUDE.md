@@ -191,9 +191,18 @@ The DEM is bare earth, so bridges and overpasses have to be made up. On 2026-10-
 
 - `supabase/schema.sql` is safe to re-run. After changing it, paste the whole file into Supabase → SQL Editor and run it.
 - Authentication → Sign In / Providers → "Allow anonymous sign-ins" must be ON. Each browser gets an invisible anonymous player account.
-- `scores`: the server stamps each score with the poster's account and name. Clients can't edit or delete scores.
-- `player_progress`: each player sees only their own row. The name is set once, can't be changed, and must be unique.
+- `scores`: the server stamps each score with the poster's account and name. Clients can't edit or delete scores. Limits (added 2026-10-18, so a script can't fill the free 500 MB database): one post per player every 10 seconds (`score_limits`, which clients can't read or write), and only each player's best time per map is kept (a slower time is skipped without an error, a faster one replaces it), so each player holds at most one row per map. The game only ever reads best times, so nothing visible changed.
+- `player_progress`: each player sees only their own row. The name is set once, can't be changed, and must be unique. `stats` and `achievements` are each capped below 4000 bytes.
 - `leaderboard` view: each player's best time per map.
+- Test schema changes before the owner runs them: load the old file, then the new one twice, into an in-memory Postgres (`@electric-sql/pglite`, installed outside the repo) with stand-ins for `auth.users`, `auth.uid()` and the `anon`/`authenticated` roles, and try normal play and abuse as each role.
+
+## Costs (all free plans, checked 2026-10-17)
+
+The owner worries about being charged. Everything is on a free plan, where going over a limit pauses the service instead of billing:
+- **Vercel: Hobby** (`billing.plan: "hobby"`, no trial, $0). Over a limit, the feature stops for up to 30 days; Spend Management exists only on Pro. The game used ~62 MB of the 100 GB monthly transfer in its first two weeks; a first visit downloads ~2.9 MB (page, all 8 maps prefetched, sounds), so ~34,000 first visits a month fit. Never start a Pro trial or pick a paid plan in a Marketplace install without the owner's OK; if the account ever goes Pro, set `npx vercel budgets set --amount <dollars> --pause` first.
+- **Unused Vercel Marketplace Supabase store `supabase-amber-pebble`**: Supabase Free Plan, $0, but connected to drive-home and injecting 16 unused env vars. Supabase pauses it after a week idle, and then every deploy fails in under a second with "Resource provisioning failed" (2026-10-13). The owner restored it on 2026-10-16; disconnecting it from drive-home (Vercel → Storage → supabase-amber-pebble → Projects → Disconnect) is the lasting fix, and agents are blocked from doing that themselves.
+- **Supabase leaderboard project** (`mfsc…`, set directly via `VITE_*`): the owner's own Supabase org; free plans never charge. It also pauses after a week with no players.
+- **GitHub**: private repo, no Actions, no LFS. The map and address services (Photon, Nominatim, OSRM demo, City of Edmonton, NRCan) are free and keyless; heavy use gets blocked, never billed.
 
 ## Testing
 
@@ -218,7 +227,7 @@ The owner plays on an M2 MacBook Air (fanless; Retina screen at 2x plus an exter
 - **Keep the look**: before/after screenshots of the same spots must match. Pixel-diff full screenshots taken at the same resolution (set `__game.renderer.setPixelRatio(devicePixelRatio)` first in the new code).
 - Things that would break this: one mesh for a whole map (cut big things into ~500 m pieces), building or compiling during a race, `backdrop-filter` on HUD panels, writing the HUD every frame, adding or removing lights at run time.
 
-## Status and handoff (2026-10-13)
+## Status and handoff (2026-10-18)
 
 This section is the compressed history and the to-do list; delete items as they get done.
 
@@ -230,7 +239,7 @@ This section is the compressed history and the to-do list; delete items as they 
   2. engines, turbo, blow-off and tyre squeal from real CC0 recordings (see "Sounds");
   3. flying stays under the High Level Bridge's upper deck and under overpasses (`clearance.js`);
   4. the road at the end of Snow Valley is visible again.
-- **On branch `wip/oct11-routes-brands-cars`, NOT live yet** (the owner's 2026-10-10 requests; waiting for the owner to try it locally and approve the deploy):
+- **Also live, pushed 2026-10-13 and deployed 2026-10-16** (the 2026-10-13 deploys failed on the paused Supabase store, see "Costs"; redeployed after the owner restored it) — the owner's 2026-10-10 requests:
   1. custom routes: any two places inside Edmonton, built in the browser with a progress bar (see "Custom routes"), on the shared builder `src/mapgen/` and the OpenStreetMap tiles in `public/osm/`;
   2. all six team cars rebuilt from the makers' official images and specifications;
   3. 11 new landmarks (West Edmonton Mall, Rogers Place, City Hall, …);
@@ -242,7 +251,9 @@ This section is the compressed history and the to-do list; delete items as they 
 
 ### Owner to-dos
 
-- If not already done since 2026-10-07: paste all of `supabase/schema.sql` into Supabase → SQL Editor and run it. Its map list now includes `snowvalley` and `refinery`; without it, posting times on those two maps fails.
+- Paste all of `supabase/schema.sql` into Supabase → SQL Editor and run it (again, for the 2026-10-18 posting limits; it also brings the map list up to date with `snowvalley` and `refinery`).
+- Disconnect the unused `supabase-amber-pebble` store from drive-home in Vercel before it pauses again (around 2026-10-23), or deploys fail (see "Costs").
+- Glance at Vercel → Settings → Billing (should say Hobby) and Supabase → the leaderboard project's organisation → Billing (should say Free).
 - `menu.png` and `race.png` in the project folder are old screenshots and can be deleted.
 - Confirm the teammates' car model years: the cars now follow the current designs (Lexus IS 2026+ facelift front, Kia Carnival 2025 facelift lights, Legacy 2025 black window frames, CR-V and Accord 2023+). An older car looks different at the front or rear.
 - Listen to the supercar engines (and the team cars) in `/sound-studio.html` and a drive: they're real recordings, but nobody has heard them yet.
@@ -252,7 +263,7 @@ This section is the compressed history and the to-do list; delete items as they 
 1. **Things on the driven road:** done 2026-10-09 (see "Road structures"). Left, cosmetic:
    - Sidewalk folds over the lanes on the ~5 m turn near the sherwood finish (s 22064–22194). The route itself turns that sharply; smoothing very sharp corners in the builder would fix it.
    - Side roads clip the underside of some real road bridges (home s 8174–8231; refinery s 1359–1810 and 11350–11424). Off the driven road.
-2. **Sound effects: done 2026-10-09; real engine recordings added 2026-10-10 (branch, not live), waiting for the owner to listen.** `src/sound.js` + `sound-studio.html` (see the code map and "Sounds"). After the owner said the turbo speed sound wasn't real, engines, the turbo whistle and blow-off, tyre squeal, the Model X, E-bike and Rocket use CC0 recordings, with the synth as fallback. Tested: samples load after the first click and the engine switches to them, the game runs normally with the sound files blocked, loop seams and rpm crossfades are clean in offline renders, no clipping, no audio-node leak over 2 minutes of busy driving, 60 fps on home and sherwood. Still to do: the owner auditions everything in `/sound-studio.html` (Recorded vs Synth, test drive) and in a drive, then says what to change. Music stays on the wishlist.
+2. **Sound effects: done 2026-10-09; real engine recordings added 2026-10-10 (live), waiting for the owner to listen.** `src/sound.js` + `sound-studio.html` (see the code map and "Sounds"). After the owner said the turbo speed sound wasn't real, engines, the turbo whistle and blow-off, tyre squeal, the Model X, E-bike and Rocket use CC0 recordings, with the synth as fallback. Tested: samples load after the first click and the engine switches to them, the game runs normally with the sound files blocked, loop seams and rpm crossfades are clean in offline renders, no clipping, no audio-node leak over 2 minutes of busy driving, 60 fps on home and sherwood. Still to do: the owner auditions everything in `/sound-studio.html` (Recorded vs Synth, test drive) and in a drive, then says what to change. Music stays on the wishlist.
 3. **Road lines across all 8 maps: reviewed 2026-10-09** (about 265 spots screenshotted). The core rules held. Fixed after the review:
    - signals at the wrong junction (lines ran through about a dozen intersections, a stop line mid-block, a missing signal on Terrace Rd);
    - folded lines and a sidewalk across the lanes at the Sherwood finish U-turn;

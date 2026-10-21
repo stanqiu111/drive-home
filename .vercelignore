@@ -2,4 +2,12 @@ node_modules
 dist
 tools/cache
 .DS_Store
-.env*.local
+.env*
+.vercel
+.wrangler
+worker/.wrangler
+worker/.dev.vars*
+backups
+.claude
+.agents
+.codex

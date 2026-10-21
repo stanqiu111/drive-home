@@ -21,7 +21,7 @@ Local D1 is separate from the remote database. The API allows the production ori
 - Names are trimmed, normalized and unique ignoring case, and cannot be changed. The server gets the score's name from the authenticated player, ignoring any name or player ID submitted by the client.
 - Only the best time per player per built-in map is stored. A transaction-level trigger enforces a ten-second posting interval, including slower submissions. Custom routes stay local.
 - Progress merges use SQL maxima and set unions, so overlapping saves cannot replace stronger progress. Payloads are limited to 12 KB; stat counters, map lists and achievements are validated.
-- Account creation is limited to 20 per IP per hour; writes to 120 per IP per minute. Limits use hashed IPs and expired windows are removed during writes. Read endpoints reveal scores only. These controls limit basic spam; browser-reported race results are still not cheat-proof.
+- Native Worker rate limiters allow 300 reads and 120 writes per IP per minute, rejecting excess requests before body parsing or D1 queries. These counters are approximate and local to each Cloudflare location; they are not a global spending cap. Missing bindings fail closed. A separate D1 counter permits 20 new accounts per hashed IP per hour, stops incrementing after the limit, and removes expired windows during accepted signups. Read endpoints reveal scores only. These controls limit basic spam; browser-reported race results are still not cheat-proof.
 
 ## Existing-player migration
 
@@ -48,7 +48,7 @@ Existing browsers send their old session to `/claim` once. The Worker verifies i
 ## Production cutover procedure
 
 1. Recheck the live Supabase data and take a fresh private snapshot. At cutover, disable old score/progress writes, take a final snapshot, and import it so old open tabs cannot create scores that are missed. Leave Supabase Auth available only for claims.
-2. Deploy this Worker with D1 binding `DB` and the exact allowed game origin. Set the migration secrets through Wrangler's protected input, never command arguments or Git. Verify `/health` and imported leaderboard results.
+2. Deploy this Worker with D1 binding `DB`, native `READ_LIMITER` and `WRITE_LIMITER` bindings, and the exact allowed game origin. Set the migration secrets through Wrangler's protected input, never command arguments or Git. Verify `/health` and imported leaderboard results.
 3. Set Vercel's `VITE_LEADERBOARD_API` to the resulting `https://drive-home-leaderboard.<account>.workers.dev` URL. Remove the two old `VITE_SUPABASE_*` variables. Build-time configuration needs a fresh Vercel deployment.
 4. Publish the reviewed branch only with the owner's approval. Verify an existing browser's identity migration, new-player naming, score submission, ranks and offline progress on the real game.
 5. Disconnect the unrelated unused `supabase-amber-pebble` Vercel store; replacing code alone does not remove that integration's provisioning failure. Keep the original active data until cutover and recovery have been checked. Retire the old project after the agreed claim window.
@@ -59,9 +59,13 @@ Rollback: restore the previous Vercel deployment/environment and keep both datab
 
 ## Operations
 
-Keep Cloudflare on Workers Free: its quotas stop requests at the free limits rather than enabling paid overages. Monitor Workers and D1 usage in the dashboard. No keep-alive cron is configured. Use D1's export/Time Travel tools for recovery; no server needs maintaining.
+Billing verified on October 21, 2026: Vercel reports active Hobby with no trial, and the Cloudflare Workers plans dashboard shows Free as the current plan ($0). Keep both plans free. Vercel serves static files only; the leaderboard API runs on Cloudflare. Excess usage can interrupt availability instead of creating usage overage charges on these plans. Request throttles reduce abuse, but the account plans provide the billing protection.
 
-Official references: [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/), [D1 API](https://developers.cloudflare.com/d1/worker-api/d1-database/), [Cloudflare agent setup](https://developers.cloudflare.com/agent-setup/prompt.md).
+Workers Free permits 100,000 requests per day. D1 Free permits 5 million rows read and 100,000 rows written per day, with 5 GB total storage. D1 queries fail when its free daily quota is exhausted, until reset. Vercel Hobby has its own free usage limits, including 100 GB transfer and 1 million edge requests. Do not enable paid plans, trials, Marketplace services, or paid firewall rules without the owner's approval. No optional Vercel WAF rate-limiting rule was enabled; automatic DDoS protection remains available.
+
+Monitor Workers and D1 usage in the dashboard. No keep-alive cron is configured. Use D1's export/Time Travel tools for recovery; no server needs maintaining. Private backups, local environment files and agent configuration are excluded from both Git and Vercel CLI uploads.
+
+Official references: [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/), [D1 pricing](https://developers.cloudflare.com/d1/platform/pricing/), [native rate limits](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/), [D1 API](https://developers.cloudflare.com/d1/worker-api/d1-database/), [Cloudflare agent setup](https://developers.cloudflare.com/agent-setup/prompt.md).
 
 ## Release record — October 21, 2026
 

@@ -202,13 +202,13 @@ The DEM is bare earth, so bridges and overpasses have to be made up. On 2026-10-
 - `leaderboard` view: each player's best time per map.
 - Test schema changes before the owner runs them: load the old file, then the new one twice, into an in-memory Postgres (`@electric-sql/pglite`, installed outside the repo) with stand-ins for `auth.users`, `auth.uid()` and the `anon`/`authenticated` roles, and try normal play and abuse as each role.
 
-## Costs (all free plans, checked 2026-10-17)
+## Costs (Vercel and Cloudflare plans checked 2026-10-21)
 
-The owner worries about being charged. Everything is on a free plan, where going over a limit pauses the service instead of billing:
-- **Vercel: Hobby** (`billing.plan: "hobby"`, no trial, $0). Over a limit, the feature stops for up to 30 days; Spend Management exists only on Pro. The game used ~62 MB of the 100 GB monthly transfer in its first two weeks; a first visit downloads ~2.9 MB (page, all 8 maps prefetched, sounds), so ~34,000 first visits a month fit. Never start a Pro trial or pick a paid plan in a Marketplace install without the owner's OK; if the account ever goes Pro, set `npx vercel budgets set --amount <dollars> --pause` first.
+The owner worries about being charged. Keep this game's hosting and API on free plans, where exhausting a free quota interrupts service instead of charging usage overages. Application rate limits reduce abuse; they are not billing caps and cannot guarantee availability under attack.
+- **Vercel: Hobby** (team API: `billing.plan: "hobby"`, status active, no trial, $0). Over a limit, the feature can stop until its quota resets; Spend Management exists only on Pro. The game is a static deployment without Vercel Functions. No optional WAF rate-limiting rule is enabled; do not enable a paid security feature or Marketplace service. Never start a Pro trial or pick a paid plan without the owner's OK. If a paid upgrade is ever requested, review spending controls before upgrading.
 - **Unused Vercel Marketplace Supabase store `supabase-amber-pebble`**: Supabase Free Plan, $0, but connected to drive-home and injecting 16 unused env vars. Supabase pauses it after a week idle, and then every deploy fails in under a second with "Resource provisioning failed" (2026-10-13). The owner restored it on 2026-10-16; disconnected from drive-home on 2026-10-21; the 16 unused environment variables were removed with the connection.
 - **Old Supabase leaderboard project** (`mfsc…`): now read-only, retained only for identity transfers through 2026-11-21. New and migrated players use D1. No keep-alive job is configured; a pause can delay an unclaimed old identity but does not affect normal D1 play.
-- **Cloudflare Workers + D1:** free setup, no paid plan enabled. API uses native D1 binding `DB`. Database `drive-home`, 371 imported identities including one historical identity, two best-score entries from three raw old scores.
+- **Cloudflare Workers + D1:** Workers dashboard confirms Free is the current plan ($0). Free quotas: 100,000 Worker requests/day, 5 million D1 rows read/day, 100,000 rows written/day and 5 GB total database storage. API uses native D1 binding `DB`. Native per-IP counters reject excess requests before D1 work (300 reads/minute, 120 writes/minute; approximate per Cloudflare location). Account creation is separately limited to 20 per hashed IP/hour. Database `drive-home` imported 371 identities including one historical identity, and two best-score entries from three raw old scores. See `worker/README.md` for billing references and limits.
 - **GitHub**: private repo, no Actions, no LFS. The map and address services (Photon, Nominatim, OSRM demo, City of Edmonton, NRCan) are free and keyless; heavy use gets blocked, never billed.
 
 ## Testing
@@ -260,7 +260,7 @@ This section is the compressed history and the to-do list; delete items as they 
 
 - After November 21, 2026, remove the three Worker `MIGRATION_*` secrets and retire the read-only old Supabase project when recovery has been checked.
 - The unused `supabase-amber-pebble` store was disconnected from drive-home on 2026-10-21; it no longer blocks deploys.
-- Glance at Vercel → Settings → Billing (should say Hobby) and Supabase → the leaderboard project's organisation → Billing (should say Free).
+- Glance at Vercel → Settings → Billing (should say Hobby) and Cloudflare → Workers plans (should say Free). Keep the old Supabase organisation on Free while it remains available for identity claims.
 - `menu.png` and `race.png` in the project folder are old screenshots and can be deleted.
 - Confirm the teammates' car model years: the cars now follow the current designs (Lexus IS 2026+ facelift front, Kia Carnival 2025 facelift lights, Legacy 2025 black window frames, CR-V and Accord 2023+). An older car looks different at the front or rear.
 - Listen to the supercar engines (and the team cars) in `/sound-studio.html` and a drive: they're real recordings, but nobody has heard them yet.

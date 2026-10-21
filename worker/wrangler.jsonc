@@ -5,6 +5,10 @@
   "main": "index.js",
   "compatibility_date": "2026-10-21",
   "observability": { "enabled": true, "traces": { "enabled": true } },
+  "ratelimits": [
+    { "name": "READ_LIMITER", "namespace_id": "20261021", "simple": { "limit": 300, "period": 60 } },
+    { "name": "WRITE_LIMITER", "namespace_id": "20261022", "simple": { "limit": 120, "period": 60 } }
+  ],
   "vars": {
     "ALLOWED_ORIGINS": "https://drive-home-beta.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
   },

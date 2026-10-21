@@ -49,8 +49,8 @@ async function rateLimit(db, key, max, seconds) {
   const now = Math.floor(Date.now() / 1000);
   const window = Math.floor(now / seconds);
   const row = await db.prepare(`INSERT INTO request_limits(key, count, expires) VALUES (?, 1, ?)
-    ON CONFLICT(key) DO UPDATE SET count = count + 1 RETURNING count`).bind(`${key}:${window}`, (window + 1) * seconds).first();
-  if (row.count > max) fail(429, 'too_many_requests');
+    ON CONFLICT(key) DO UPDATE SET count = count + 1 WHERE count < ? RETURNING count`).bind(`${key}:${window}`, (window + 1) * seconds, max).first();
+  if (!row) fail(429, 'too_many_requests');
   // Indexed primary keys bound each window; remove expired entries on writes.
   await db.prepare('DELETE FROM request_limits WHERE expires < ?').bind(now).run();
 }
@@ -120,12 +120,11 @@ async function route(request, env) {
   const token = request.headers.get('Authorization')?.replace(/^Bearer /, '');
   if (!TOKEN.test(token ?? '')) fail(401, 'invalid_token');
   const tokenHash = await hash(token);
-  const ip = await hash(request.headers.get('CF-Connecting-IP') ?? 'local');
-  await rateLimit(db, `write:${ip}`, 120, 60);
   const data = await body(request);
   if (url.pathname === '/session') {
     let row = await db.prepare('SELECT * FROM players WHERE token_hash = ?').bind(tokenHash).first();
     if (!row) {
+      const ip = await hash(request.headers.get('CF-Connecting-IP') ?? 'local');
       await rateLimit(db, `signup:${ip}`, 20, 3600);
       await db.prepare('INSERT INTO players(id, token_hash) VALUES (?, ?) ON CONFLICT(token_hash) DO NOTHING').bind(crypto.randomUUID(), tokenHash).run();
       row = await player(db, tokenHash);
@@ -186,7 +185,20 @@ export default {
     let response;
     if (request.method === 'OPTIONS') response = new Response(null, { status: 204 });
     else {
-      try { response = await route(request, env); }
+      try {
+        const path = new URL(request.url).pathname;
+        const read = request.method === 'GET' && ['/health', '/scores'].includes(path);
+        const write = ['POST', 'PUT'].includes(request.method) && ['/session', '/claim', '/name', '/progress', '/scores'].includes(path);
+        if (!read && !write) fail(404, 'not_found');
+        // Native, in-memory edge counters reject floods before any D1 work.
+        // These generous IP limits also cover unauthenticated public reads.
+        // They are approximate per location; Free plan quotas are the billing cap.
+        const limiter = read ? env.READ_LIMITER : env.WRITE_LIMITER;
+        if (!limiter) fail(503, 'rate_limit_unavailable');
+        const { success } = await limiter.limit({ key: request.headers.get('CF-Connecting-IP') ?? 'local' });
+        if (!success) fail(429, 'too_many_requests');
+        response = await route(request, env);
+      }
       catch (e) {
         if (!e.status) console.error(JSON.stringify({ event: 'request_failed', path: new URL(request.url).pathname }));
         response = json({ error: e.code ?? 'service_unavailable' }, e.status ?? 503);
@@ -197,6 +209,7 @@ export default {
     response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
     response.headers.set('Access-Control-Allow-Headers', 'Authorization, Content-Type');
     response.headers.set('X-Content-Type-Options', 'nosniff');
+    if (response.status === 429) response.headers.set('Retry-After', '60');
     return response;
   },
 };

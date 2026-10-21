@@ -7,6 +7,7 @@ import worker from './index.js';
 let mf, db;
 const a = 'a'.repeat(64), b = 'b'.repeat(64);
 const origin = 'http://localhost:5173';
+const allowLimiter = { limit: async () => ({ success: true }) };
 async function call(path, data, token = a, requestOrigin = origin) {
   const headers = { Origin: requestOrigin };
   if (data !== undefined) Object.assign(headers, { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` });
@@ -18,7 +19,11 @@ async function call(path, data, token = a, requestOrigin = origin) {
 }
 before(async () => {
   mf = new Miniflare(convertV4MiniflareOptions({ modules: true, scriptPath: new URL('./index.js', import.meta.url).pathname,
-    compatibilityDate: '2026-10-21', d1Databases: ['DB'], bindings: { ALLOWED_ORIGINS: origin } }));
+    compatibilityDate: '2026-10-21', d1Databases: ['DB'], bindings: { ALLOWED_ORIGINS: origin },
+    ratelimits: {
+      READ_LIMITER: { namespace_id: '20261021', simple: { limit: 300, period: 60 } },
+      WRITE_LIMITER: { namespace_id: '20261022', simple: { limit: 120, period: 60 } },
+    } }));
   db = await mf.getD1Database('DB');
   const schema = await readFile(new URL('./schema.sql', import.meta.url), 'utf8');
   for (const sql of schema.split(/(?<=;)\s*\n\n/).filter((s) => s.trim())) await db.prepare(sql).run();
@@ -85,7 +90,7 @@ test('legacy claim verifies ownership, preserves records and is safe to retry', 
   const id = 'old-player';
   await db.prepare('INSERT INTO players(id,name,name_key,stats) VALUES (?,?,?,?)').bind(id, 'Original', 'original', '{"trips":9}').run();
   await db.prepare('INSERT INTO scores(player_id,map,car,time_ms,crashes) VALUES (?,?,?,?,?)').bind(id, 'home', 'legacy', 80000, 0).run();
-  const env = { DB: db, ALLOWED_ORIGINS: origin, MIGRATION_SUPABASE_URL: 'https://old.example', MIGRATION_SUPABASE_KEY: 'test-public-key', MIGRATION_DEADLINE: '2099-01-01T00:00:00Z' };
+  const env = { DB: db, READ_LIMITER: allowLimiter, WRITE_LIMITER: allowLimiter, ALLOWED_ORIGINS: origin, MIGRATION_SUPABASE_URL: 'https://old.example', MIGRATION_SUPABASE_KEY: 'test-public-key', MIGRATION_DEADLINE: '2099-01-01T00:00:00Z' };
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async (url, init) => {
@@ -119,7 +124,7 @@ test('new browser identities are rate limited', async () => {
 });
 
 test('expired legacy sessions refresh on 403; an outage does not discard identity', async () => {
-  const env = { DB: db, ALLOWED_ORIGINS: origin, MIGRATION_SUPABASE_URL: 'https://old.example', MIGRATION_SUPABASE_KEY: 'public-test', MIGRATION_DEADLINE: '2099-01-01T00:00:00Z' };
+  const env = { DB: db, READ_LIMITER: allowLimiter, WRITE_LIMITER: allowLimiter, ALLOWED_ORIGINS: origin, MIGRATION_SUPABASE_URL: 'https://old.example', MIGRATION_SUPABASE_KEY: 'public-test', MIGRATION_DEADLINE: '2099-01-01T00:00:00Z' };
   await db.prepare('INSERT INTO players(id) VALUES (?)').bind('expired-player').run();
   const originalFetch = globalThis.fetch;
   let calls = 0;
@@ -145,4 +150,29 @@ test('expired legacy sessions refresh on 403; an outage does not discard identit
     assert.equal(unavailable.status, 503);
     assert.equal((await unavailable.json()).error, 'legacy_service_unavailable');
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('read and write floods are rejected without database queries', async () => {
+  let queries = 0;
+  const deny = { limit: async () => ({ success: false }) };
+  const env = { DB: { prepare() { queries++; throw new Error('Database must not be reached'); } }, ALLOWED_ORIGINS: origin,
+    READ_LIMITER: deny, WRITE_LIMITER: deny };
+  for (const [path, method] of [['/scores', 'GET'], ['/health', 'GET'], ['/session', 'POST'], ['/scores', 'POST'], ['/progress', 'POST']]) {
+    const response = await worker.fetch(new Request(`https://example.com${path}`, { method, headers: { Origin: origin } }), env);
+    assert.equal(response.status, 429);
+    assert.equal(response.headers.get('Retry-After'), '60');
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), origin);
+  }
+  assert.equal(queries, 0);
+  delete env.READ_LIMITER;
+  assert.equal((await worker.fetch(new Request('https://example.com/scores'), env)).status, 503);
+  assert.equal(queries, 0);
+});
+
+test('rejected account creation stops consuming database writes', async () => {
+  const before = await db.prepare("SELECT count FROM request_limits WHERE key LIKE 'signup:%'").first();
+  assert.equal((await call('/session', {}, '9'.repeat(64))).status, 429);
+  const after = await db.prepare("SELECT count FROM request_limits WHERE key LIKE 'signup:%'").first();
+  assert.equal(before.count, 20);
+  assert.equal(after.count, 20);
 });

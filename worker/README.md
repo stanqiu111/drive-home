@@ -4,6 +4,8 @@ The Vite game stays on Vercel. A small Cloudflare Worker validates requests and 
 
 ## Local development
 
+Use Node.js 22.12+ for the game and backend tools.
+
 ```sh
 npm ci
 npm run online:init:local

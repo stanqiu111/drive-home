@@ -4,7 +4,7 @@ A 3D browser driving game on real Edmonton roads: beat the rush-hour commute.
 Three.js + Vite, plain JavaScript ES modules, no framework.
 
 - Live: https://drive-home-beta.vercel.app (Vercel project `drive-home`)
-- Repo: https://github.com/stanqiu111/drive-home (private)
+- Repo: https://github.com/stanqiu111/drive-home
 
 ## Working with the owner
 
@@ -29,7 +29,7 @@ node tools/build-maps.mjs [id]   # rebuild maps (see "Map data")
 node tools/build-osm-tiles.mjs   # refresh public/osm/ from the Alberta .pbf (see "Map data")
 ```
 
-- Needs Node `^20.19` or `>=22.12` (Vite 8).
+- Needs Node `>=22.12` for Vite and the backend tools.
 - Online features on this migration branch use `VITE_LEADERBOARD_API` (the Cloudflare Worker URL). Without it, the game works offline. See `worker/README.md` for local setup, identity migration and production cutover. The owner approved the production cutover on 2026-10-21.
 
 ## Code map (`src/`)
@@ -209,7 +209,7 @@ The owner worries about being charged. Keep this game's hosting and API on free 
 - **Unused Vercel Marketplace Supabase store `supabase-amber-pebble`**: Supabase Free Plan, $0, but connected to drive-home and injecting 16 unused env vars. Supabase pauses it after a week idle, and then every deploy fails in under a second with "Resource provisioning failed" (2026-10-13). The owner restored it on 2026-10-16; disconnected from drive-home on 2026-10-21; the 16 unused environment variables were removed with the connection.
 - **Old Supabase leaderboard project** (`mfsc…`): now read-only, retained only for identity transfers through 2026-11-21. New and migrated players use D1. No keep-alive job is configured; a pause can delay an unclaimed old identity but does not affect normal D1 play.
 - **Cloudflare Workers + D1:** Workers dashboard confirms Free is the current plan ($0). Free quotas: 100,000 Worker requests/day, 5 million D1 rows read/day, 100,000 rows written/day and 5 GB total database storage. API uses native D1 binding `DB`. Native per-IP counters reject excess requests before D1 work (300 reads/minute, 120 writes/minute; approximate per Cloudflare location). Account creation is separately limited to 20 per hashed IP/hour. Database `drive-home` imported 371 identities including one historical identity, and two best-score entries from three raw old scores. See `worker/README.md` for billing references and limits.
-- **GitHub**: private repo, no Actions, no LFS. The map and address services (Photon, Nominatim, OSRM demo, City of Edmonton, NRCan) are free and keyless; heavy use gets blocked, never billed.
+- **GitHub**: no Actions workflows or LFS. The map and address services (Photon, Nominatim, OSRM demo, City of Edmonton, NRCan) are free and keyless; heavy use gets blocked, never billed. Keep local credentials, player-data backups and agent settings out of Git; `.gitignore` excludes them.
 
 ## Testing
 

@@ -5,6 +5,9 @@ tools/cache
 .env*.local
 .vercel
 .env*
+.wrangler/
+worker/.dev.vars
+backups/
 
 # Claude Code helper worktrees
 .claude/worktrees/

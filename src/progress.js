@@ -1,7 +1,7 @@
 // Achievements and per-player stats. Progress is kept in localStorage so it works
-// offline, and synced to Supabase (one row per anonymously signed-in player) when
+// offline, and synced to D1 (one row per browser-scoped player) when
 // the database is configured. Merging always keeps the best of both copies.
-import { supabase } from './supabase.js';
+import { onlineEnabled, onlineRequest, connectPlayer } from './online.js';
 
 export const ACHIEVEMENTS = [
   { id: 'first_trip', icon: '🏁', name: 'First commute', desc: 'Finish any drive', stat: 'trips', goal: 1 },
@@ -57,17 +57,10 @@ class Progress {
 
   // Sign in (anonymously, once per browser) and pull this player's saved progress.
   async connect() {
-    if (!supabase) return;
+    if (!onlineEnabled) return;
     try {
-      let { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        const { data, error } = await supabase.auth.signInAnonymously();
-        if (error) throw error;
-        session = data.session;
-      }
-      this.userId = session.user.id;
-      const { data: row, error } = await supabase.from('player_progress').select('stats, achievements, name').eq('user_id', this.userId).maybeSingle();
-      if (error) throw error;
+      const row = await connectPlayer();
+      this.userId = row.id;
       if (row) this.data = merge(this.data, { stats: row.stats || {}, achievements: row.achievements || [] });
       this.name = row?.name ?? null;
       this.online = true;
@@ -84,10 +77,11 @@ class Progress {
   async setName(name) {
     if (!this.online || this.name) return 'error';
     const clean = name.trim().slice(0, 16);
-    const { error } = await supabase.from('player_progress').update({ name: clean }).eq('user_id', this.userId);
-    if (error) return error.code === '23505' ? 'taken' : 'error';
-    this.name = clean;
-    return null;
+    try {
+      const row = await onlineRequest('/name', { name: clean });
+      this.name = row.name;
+      return null;
+    } catch (e) { return e.code === 'name_taken' ? 'taken' : 'error'; }
   }
 
   saveLocal() {
@@ -96,10 +90,11 @@ class Progress {
 
   async push() {
     if (!this.online) return;
-    const { error } = await supabase.from('player_progress').upsert({
-      user_id: this.userId, stats: this.data.stats, achievements: this.data.achievements, updated_at: new Date().toISOString(),
-    });
-    if (error) console.warn('Could not save progress online:', error.message);
+    try {
+      const row = await onlineRequest('/progress', this.data);
+      this.data = merge(this.data, row);
+      this.saveLocal();
+    } catch (e) { console.warn('Could not save progress online:', e.message); }
   }
 
   // Unlock anything newly earned. Returns the achievements that just unlocked.

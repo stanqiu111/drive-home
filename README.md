@@ -54,7 +54,9 @@ npm install
 npm run dev        # then open http://localhost:5173
 ```
 
-The game works without any setup. The online leaderboard needs a `.env.local` file with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`; team members can get it with `npx vercel login`, `npx vercel link`, then `npx vercel env pull .env.local`. Without it, the leaderboard is hidden and progress is saved on the device.
+The game works without any setup. The online leaderboard needs `VITE_LEADERBOARD_API` in `.env.local`, pointing to the Cloudflare Worker API. Without it, the leaderboard is hidden and progress is saved on the device. To run the backend locally, use `npm run online:init:local`, then `npm run online:dev`, and start Vite with `VITE_LEADERBOARD_API=http://127.0.0.1:8787 npm run dev`.
+
+The backend uses a small Cloudflare D1 database. There is no database password or Supabase SDK in the game. See [the backend setup and migration guide](worker/README.md) for deployment and existing-player migration.
 
 Other commands:
 
@@ -84,13 +86,14 @@ Custom routes run the same map builder (`src/mapgen/`) inside the browser, so th
 | `src/` | The game: `main.js` (menu, race, driving), `world.js` (building the 3D city), `cars.js` and `supercars/`, `traffic.js`, `signals.js`, `sound.js`, `landmarks/`, `mapgen/` (the map builder) |
 | `public/` | Built maps, OpenStreetMap tiles, sounds |
 | `tools/` | Map and sound builders, the road-line check, test scripts in `tools/dev/` |
-| `supabase/schema.sql` | The leaderboard database (paste into Supabase's SQL Editor to set up or update) |
+| `worker/` | Cloudflare leaderboard API, D1 schema and backend tests |
+| `supabase/schema.sql` | Historical Supabase schema, retained for migration and rollback |
 
 [`CLAUDE.md`](CLAUDE.md) has the full project notes: how every part works, the rules that keep road lines and bridges right, how to add a map, car, landmark, brand or sound, testing and performance targets, and the to-do list.
 
 ## Deploying
 
-The game is hosted on Vercel (free Hobby plan) and the leaderboard on Supabase (free plan); neither can charge for going over a limit, they pause instead. Pushing to `main` on GitHub deploys the live game automatically, so work in progress goes on a branch and goes to `main` only once it has been checked.
+The game is hosted on Vercel (Hobby plan). The leaderboard runs on Cloudflare Workers and D1. Existing anonymous Supabase players can transfer their identity through November 21, 2026; new and transferred players use D1 only. Keep Cloudflare Workers on the Free plan. Pushing to `main` on GitHub deploys the live game automatically, so work in progress goes on a branch and goes to `main` only once it has been checked.
 
 ## Credits
 

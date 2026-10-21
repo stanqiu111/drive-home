@@ -1,0 +1,16 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "drive-home-leaderboard",
+  "account_id": "6034749cdd00887fdee2dea164da8021",
+  "main": "index.js",
+  "compatibility_date": "2026-10-21",
+  "observability": { "enabled": true, "traces": { "enabled": true } },
+  "vars": {
+    "ALLOWED_ORIGINS": "https://drive-home-beta.vercel.app,http://localhost:5173,http://127.0.0.1:5173"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "drive-home",
+    "database_id": "be2d7d64-2992-44cd-9aaa-039bcc36b37b"
+  }]
+}

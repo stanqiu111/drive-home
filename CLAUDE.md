@@ -30,7 +30,7 @@ node tools/build-osm-tiles.mjs   # refresh public/osm/ from the Alberta .pbf (se
 ```
 
 - Needs Node `^20.19` or `>=22.12` (Vite 8).
-- Online features need `.env.local` with `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Get it with `npx vercel login`, `npx vercel link`, then `npx vercel env pull .env.local`. Without it, the game still works and the leaderboard and online progress are hidden.
+- Online features on this migration branch use `VITE_LEADERBOARD_API` (the Cloudflare Worker URL). Without it, the game works offline. See `worker/README.md` for local setup, identity migration and production cutover. The owner approved the production cutover on 2026-10-21.
 
 ## Code map (`src/`)
 
@@ -83,7 +83,7 @@ node tools/build-osm-tiles.mjs   # refresh public/osm/ from the Alberta .pbf (se
   - The AudioContext starts on the first click or key, suspends while muted or the tab is hidden, and nothing throws without Web Audio. Event counters tick even when muted, for tests.
 - `sound-samples.js`: generated list of where each recorded loop sits in `public/sounds/*.m4a`, its rpm and length. Don't edit by hand (see "Sounds").
 - `sound-studio.html` (dev page, `/sound-studio.html`): buttons for every sound, hold-to-honk horns, an engine panel (vehicle, speed, gas, nitro, drift…) with a **Recorded / Synth** switch, a scripted test drive (idle, revs, full throttle through the gears, nitro, lift off with blow-off, drift, braking), turbo-spool and squeal buttons, and "Run the check", which renders each sound offline and reports peak, loudness, clean starts/ends, clean loop seams and smooth rpm crossfades. Use it after changing sounds.
-- `leaderboard.js`, `supabase.js`: online features.
+- `leaderboard.js`, `online.js`, `progress.js`: browser online features; `worker/index.js` and `worker/schema.sql`: Cloudflare API and D1 storage.
 - `custom-route.js`: the "Your routes" feature (see "Custom routes"): the builder screen (address search, route preview, progress bar), saving maps on the device (IndexedDB) and loading them back.
 - `mapgen/`: the map builder, shared by `tools/build-maps.mjs` (Node) and the custom-route builder (browser). `core.js` is all the building logic (`buildMapData`, projection, lane cleaning, structures, buildings, signals), `osm-tiles.js` reads the OpenStreetMap tiles in `public/osm/`, `dem.js` reads NRCan terrain, `edmonton.js` has the city limits and route limits, `worker.js` runs a custom build in a background thread.
 - `car-studio.html` (dev page, `/car-studio.html?id=crv`): one car from six angles (`ortho=1` for front/side/rear/top with a 0.5 m grid, `traffic=1`, `far=1`), with its measured size in `window.info`. Screenshot it with `node tools/dev/studio-shot.mjs "<url>" out.png`. Use it to compare a car with the maker's official photos.
@@ -105,7 +105,7 @@ node tools/build-osm-tiles.mjs   # refresh public/osm/ from the Alberta .pbf (se
 - Maps can have their own `start` (lon/lat) and `from` label; the two downtown maps start on 107 St by the Legislature (a public street). Raised structures are decided here (see "Road structures"). Railways come from a separate one-time pass over the `.pbf` (`tools/cache/osm-rail.json`).
 - Side roads are kept only on the map's own ground (`clipRoadsToGround`: within `TERRAIN_RADIUS` + 100 m of the route). OpenStreetMap ways are first kept near the routes (`osmNearRoutes`: roads within ~550 m, buildings ~450 m, railways 300 m). For the built-in maps that filter uses all eight routes together (as the old corridor extract did); a custom map uses only its own route. So a built-in map also gets far side streets, and OSM names, places and building types for its far skyline towers, where another route passes nearby (a custom build of the same route has fewer far streets, and some towers ~550 m+ away lose their name or change style). It also means adding a ninth map to `MAPS` changes the other maps' files on the next rebuild: check that diff, it isn't a regression.
 - Building classes come from OSM tags, then City of Edmonton zoning polygons (`fixa-tstc`, cached per map), then OSM land use, then size. Footprints under a landmark's `excludeR` are dropped. Named buildings keep their OSM name (`n`) for signs.
-- **Adding a map:** add it to `MAPS` in `tools/build-maps.mjs` and to `MAP_INFO` in `src/main.js`, rebuild, then add its id to BOTH `map in (...)` checks in `supabase/schema.sql` and re-run the SQL; otherwise posting times on that map fails.
+- **Adding a map:** add it to `MAPS` in `tools/build-maps.mjs` and to `MAP_INFO` in `src/main.js`, rebuild, then add its id to `MAPS` in `worker/index.js` and the map constraint in `worker/schema.sql` (existing databases need a reviewed schema migration); otherwise posting times on that map fails.
 - **Adding a landmark:** add an entry to `src/landmark-list.js`, write `src/landmarks/<id>.js`, check it with `landmark-studio.html`, then rebuild the maps so footprints under it are dropped and the route callout is written.
 
 ## Sounds (`tools/sounds/build-sounds.mjs`)
@@ -187,7 +187,13 @@ The DEM is bare earth, so bridges and overpasses have to be made up. On 2026-10-
   - a hump steeper than its limits or higher than `HUMP_MAX`.
 - After changing structures, screenshot the overpasses and humps from the driver's view.
 
-## Database (Supabase free tier)
+## Database (Cloudflare D1)
+
+- This branch replaces Supabase with the Worker/D1 API. See `worker/README.md` for the runbook. `npm run test:online` exercises the real local Cloudflare runtime and SQLite behavior.
+- New D1 database: `drive-home`, ID `be2d7d64-2992-44cd-9aaa-039bcc36b37b`, Western North America. Worker: `https://drive-home-leaderboard.drive-home.workers.dev`. Production cutover approved 2026-10-21.
+- Private snapshots belong in ignored `backups/`. Retain the active Supabase project through the temporary identity-claim window; new and migrated players use D1 only.
+
+### Historical Supabase setup (read-only after cutover; do not re-run schema)
 
 - `supabase/schema.sql` is safe to re-run. After changing it, paste the whole file into Supabase → SQL Editor and run it.
 - Authentication → Sign In / Providers → "Allow anonymous sign-ins" must be ON. Each browser gets an invisible anonymous player account.
@@ -200,13 +206,14 @@ The DEM is bare earth, so bridges and overpasses have to be made up. On 2026-10-
 
 The owner worries about being charged. Everything is on a free plan, where going over a limit pauses the service instead of billing:
 - **Vercel: Hobby** (`billing.plan: "hobby"`, no trial, $0). Over a limit, the feature stops for up to 30 days; Spend Management exists only on Pro. The game used ~62 MB of the 100 GB monthly transfer in its first two weeks; a first visit downloads ~2.9 MB (page, all 8 maps prefetched, sounds), so ~34,000 first visits a month fit. Never start a Pro trial or pick a paid plan in a Marketplace install without the owner's OK; if the account ever goes Pro, set `npx vercel budgets set --amount <dollars> --pause` first.
-- **Unused Vercel Marketplace Supabase store `supabase-amber-pebble`**: Supabase Free Plan, $0, but connected to drive-home and injecting 16 unused env vars. Supabase pauses it after a week idle, and then every deploy fails in under a second with "Resource provisioning failed" (2026-10-13). The owner restored it on 2026-10-16; disconnecting it from drive-home (Vercel → Storage → supabase-amber-pebble → Projects → Disconnect) is the lasting fix, and agents are blocked from doing that themselves.
-- **Supabase leaderboard project** (`mfsc…`, set directly via `VITE_*`): the owner's own Supabase org; free plans never charge. It also pauses after a week with no players.
+- **Unused Vercel Marketplace Supabase store `supabase-amber-pebble`**: Supabase Free Plan, $0, but connected to drive-home and injecting 16 unused env vars. Supabase pauses it after a week idle, and then every deploy fails in under a second with "Resource provisioning failed" (2026-10-13). The owner restored it on 2026-10-16; disconnected from drive-home on 2026-10-21; the 16 unused environment variables were removed with the connection.
+- **Old Supabase leaderboard project** (`mfsc…`): now read-only, retained only for identity transfers through 2026-11-21. New and migrated players use D1. No keep-alive job is configured; a pause can delay an unclaimed old identity but does not affect normal D1 play.
+- **Cloudflare Workers + D1:** free setup, no paid plan enabled. API uses native D1 binding `DB`. Database `drive-home`, 371 imported identities including one historical identity, two best-score entries from three raw old scores.
 - **GitHub**: private repo, no Actions, no LFS. The map and address services (Photon, Nominatim, OSRM demo, City of Edmonton, NRCan) are free and keyless; heavy use gets blocked, never billed.
 
 ## Testing
 
-- There are no unit tests. Check changes by running the dev server and driving the game with headless Chrome (puppeteer-core, a dev dependency) and screenshots. Use `window.__game` to jump along the route (`S.s`), start races and finish.
+- `npm run test:online` checks the Cloudflare API. For game visuals, check changes by running the dev server and driving the game with headless Chrome (puppeteer-core, a dev dependency) and screenshots. Use `window.__game` to jump along the route (`S.s`), start races and finish.
 - `node tools/dev/shots.mjs <map> <s,s,...>` saves a driver's view and a high view at each route position and prints fps. Write other throwaway test scripts outside the repo.
 - `node tools/dev/studio-shot.mjs "<url>" out.png` screenshots a dev page that sets `window.ready` (car-studio, landmark-studio).
 - `node tools/dev/check-brands.mjs [port] [maps]` checks that no brand site (canopy, forecourt, pylon, portal) stands on the driven road on any map; `node tools/dev/check-landmarks.mjs [port]` does the same for landmarks. Both must report 0.
@@ -251,8 +258,8 @@ This section is the compressed history and the to-do list; delete items as they 
 
 ### Owner to-dos
 
-- Paste all of `supabase/schema.sql` into Supabase → SQL Editor and run it (again, for the 2026-10-18 posting limits; it also brings the map list up to date with `snowvalley` and `refinery`).
-- Disconnect the unused `supabase-amber-pebble` store from drive-home in Vercel before it pauses again (around 2026-10-23), or deploys fail (see "Costs").
+- After November 21, 2026, remove the three Worker `MIGRATION_*` secrets and retire the read-only old Supabase project when recovery has been checked.
+- The unused `supabase-amber-pebble` store was disconnected from drive-home on 2026-10-21; it no longer blocks deploys.
 - Glance at Vercel → Settings → Billing (should say Hobby) and Supabase → the leaderboard project's organisation → Billing (should say Free).
 - `menu.png` and `race.png` in the project folder are old screenshots and can be deleted.
 - Confirm the teammates' car model years: the cars now follow the current designs (Lexus IS 2026+ facelift front, Kia Carnival 2025 facelift lights, Legacy 2025 black window frames, CR-V and Accord 2023+). An older car looks different at the front or rear.

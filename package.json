@@ -7,17 +7,21 @@
     "dev": "vite",
     "build": "node tools/check-roads.mjs && vite build",
     "check:roads": "node tools/check-roads.mjs",
+    "test:online": "node --test worker/worker.test.mjs",
+    "online:dev": "wrangler dev --config worker/wrangler.jsonc --port 8787",
+    "online:init:local": "wrangler d1 execute drive-home --local --config worker/wrangler.jsonc --file worker/schema.sql",
     "preview": "vite preview"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.117.2",
     "geotiff": "^3.0.5",
     "proj4": "^2.22.0",
     "three": "^0.186.1"
   },
   "devDependencies": {
+    "miniflare": "5.20261019.1-beta",
     "osm-pbf-parser-node": "^1.1.4",
     "puppeteer-core": "^25.13.0",
-    "vite": "^8.3.2"
+    "vite": "8.3.3",
+    "wrangler": "4.151.3"
   }
 }

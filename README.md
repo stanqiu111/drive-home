@@ -104,6 +104,8 @@ Custom routes run the same map builder (`src/mapgen/`) inside the browser, so th
 
 ## Deploying
 
+Follow [the shipping workflow](docs/SHIPPING.md) for branches, verification, pull requests, owner approval, deployment and recovery.
+
 The game is served as static files on Vercel Hobby. The leaderboard API runs on Cloudflare Workers and D1. Existing anonymous Supabase players can transfer their identity before **November 21, 2026 at 00:00 UTC**; new and transferred players use D1 only. The old Supabase authentication service is needed only for these temporary identity claims. See [the backend guide](worker/README.md) for deployment, migration cleanup and recovery.
 
 Pushing to `main` on GitHub deploys the live game automatically, so work in progress goes on a branch and goes to `main` only once it has been checked and the owner has approved deployment. Worker changes require a separate Wrangler deployment.

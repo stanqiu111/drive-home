@@ -8,6 +8,7 @@ Three.js + Vite, plain JavaScript ES modules, no framework.
 
 ## Working with the owner
 
+- Follow [docs/SHIPPING.md](docs/SHIPPING.md): work on a branch, verify, review, and open a pull request. The owner merges unless they explicitly ask the agent to merge in the current conversation.
 - The owner is not a programmer. Do the work end to end, check it yourself (screenshots, test drives), and explain results simply.
 - **No paid APIs.** No API keys and no Claude/Anthropic API calls from the game. Free data and free tiers only.
 - **Privacy:** never put the owner's real home or start address in code, map data, UI or commits. On purpose, the routes start at a public spot on 91 St SW (Summerside) and the Downtown map ends by the Alberta Legislature.

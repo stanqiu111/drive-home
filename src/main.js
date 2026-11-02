@@ -197,6 +197,9 @@ const S = {
   power: null, powerTime: 0, len: 4.6, width: 2,
   time: 0, crashes: 0, smashed: 0, reds: 0, invuln: 0, shake: 0, countdown: 0, fov: 62,
 };
+// The menu stays on screen while a map loads (the first visit's sign-in usually ends then), so
+// news from the server redraws it in both modes; after a race, showMenu() redraws it.
+const menuOpen = () => S.mode === 'menu' || S.mode === 'loading';
 let world = null;
 let route = null;
 let signals = null;
@@ -450,7 +453,7 @@ async function loadRanks() {
     ranks = {};
     for (const r of rows) (ranks[r.map] ??= []).push(r);
     for (const list of Object.values(ranks)) list.sort((a, b) => a.time_ms - b.time_ms);
-    if (S.mode === 'menu') renderMenu();
+    if (menuOpen()) renderMenu();
   } catch { /* offline */ }
 }
 
@@ -592,7 +595,7 @@ function popAchievement(text, sfx = 'achievement') {
 progress.onChange((fresh) => {
   for (const a of fresh) popAchievement(`🏅 ${a.icon} ${a.name}!`);
   if (fresh.length && progress.rocketUnlocked) popAchievement('🚀 ROCKET UNLOCKED! Pick it in the garage', 'unlock');
-  if (S.mode === 'menu') renderMenu();
+  if (menuOpen()) renderMenu();
 });
 
 ui.mapList.addEventListener('click', (e) => {
@@ -1257,5 +1260,5 @@ selectCar(prefs.car);
 // in the background while the first map is built.
 const persistentReady = renderer.compileAsync(scene, camera);
 selectMap(prefs.map);
-progressReady.then(() => { if (S.mode === 'menu') renderMenu(); loadRanks(); });
+progressReady.then(loadRanks); // signing in redraws the menu through progress.onChange
 requestAnimationFrame(frame);

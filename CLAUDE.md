@@ -31,7 +31,7 @@ node tools/build-osm-tiles.mjs   # refresh public/osm/ from the Alberta .pbf (se
 ```
 
 - Needs Node `>=22.12` for Vite and the backend tools.
-- Online features on this migration branch use `VITE_LEADERBOARD_API` (the Cloudflare Worker URL). Without it, the game works offline. See `worker/README.md` for local setup, identity migration and production cutover. The owner approved the production cutover on 2026-10-21.
+- Online features use `VITE_LEADERBOARD_API` (the Cloudflare Worker URL). Without it, the game works offline. See `worker/README.md` for local setup, deploying the Worker and recovery.
 
 ## Code map (`src/`)
 
@@ -190,26 +190,17 @@ The DEM is bare earth, so bridges and overpasses have to be made up. On 2026-10-
 
 ## Database (Cloudflare D1)
 
-- This branch replaces Supabase with the Worker/D1 API. See `worker/README.md` for the runbook. `npm run test:online` exercises the real local Cloudflare runtime and SQLite behavior.
-- New D1 database: `drive-home`, ID `be2d7d64-2992-44cd-9aaa-039bcc36b37b`, Western North America. Worker: `https://drive-home-leaderboard.drive-home.workers.dev`. Production cutover approved 2026-10-21.
-- Private snapshots belong in ignored `backups/`. Retain the active Supabase project through the temporary identity-claim window; new and migrated players use D1 only.
-
-### Historical Supabase setup (read-only after cutover; do not re-run schema)
-
-- `supabase/schema.sql` is safe to re-run. After changing it, paste the whole file into Supabase → SQL Editor and run it.
-- Authentication → Sign In / Providers → "Allow anonymous sign-ins" must be ON. Each browser gets an invisible anonymous player account.
-- `scores`: the server stamps each score with the poster's account and name. Clients can't edit or delete scores. Limits (added 2026-10-18, so a script can't fill the free 500 MB database): one post per player every 10 seconds (`score_limits`, which clients can't read or write), and only each player's best time per map is kept (a slower time is skipped without an error, a faster one replaces it), so each player holds at most one row per map. The game only ever reads best times, so nothing visible changed.
-- `player_progress`: each player sees only their own row. The name is set once, can't be changed, and must be unique. `stats` and `achievements` are each capped below 4000 bytes.
-- `leaderboard` view: each player's best time per map.
-- Test schema changes before the owner runs them: load the old file, then the new one twice, into an in-memory Postgres (`@electric-sql/pglite`, installed outside the repo) with stand-ins for `auth.users`, `auth.uid()` and the `anon`/`authenticated` roles, and try normal play and abuse as each role.
+- The leaderboard and player progress run on a Cloudflare Worker with D1 (`worker/`). See `worker/README.md` for the runbook (local setup, deploying, recovery). `npm run test:online` exercises the real local Cloudflare runtime and SQLite behavior.
+- D1 database: `drive-home`, ID `be2d7d64-2992-44cd-9aaa-039bcc36b37b`, Western North America. Worker: `https://drive-home-leaderboard.drive-home.workers.dev`. The Worker deploys separately from the game (`npx wrangler deploy --config worker/wrangler.jsonc`, with the owner's approval).
+- **Supabase is retired** (2026-11-02, the owner's OK). The game used it until the 2026-10-21 cutover to D1. On 2026-11-02 the account transfer was closed early (Supabase had paused the old project, so transfers had stopped working anyway), the three `MIGRATION_*` Worker secrets were removed, and the 370 never-transferred old accounts, all test users (including "TestBot" and "lololololol" and their two times), were deleted from D1, leaving 13 players and Cam's one time. `/claim` stays as a stub that answers `410 migration_closed`, so older game pages fall through to `/session`. Nothing in the game or the Worker uses Supabase; don't add it back.
+- Before deleting or rewriting D1 data: record the Time Travel bookmark, export to ignored `backups/`, and check the export restores into a throwaway local database (see `worker/README.md`). The 2026-11-02 export is `backups/d1-before-supabase-retirement-2026-11-02.sql`.
 
 ## Costs (Vercel and Cloudflare plans checked 2026-10-21)
 
 The owner worries about being charged. Keep this game's hosting and API on free plans, where exhausting a free quota interrupts service instead of charging usage overages. Application rate limits reduce abuse; they are not billing caps and cannot guarantee availability under attack.
 - **Vercel: Hobby** (team API: `billing.plan: "hobby"`, status active, no trial, $0). Over a limit, the feature can stop until its quota resets; Spend Management exists only on Pro. The game is a static deployment without Vercel Functions. No optional WAF rate-limiting rule is enabled; do not enable a paid security feature or Marketplace service. Never start a Pro trial or pick a paid plan without the owner's OK. If a paid upgrade is ever requested, review spending controls before upgrading.
-- **Unused Vercel Marketplace Supabase store `supabase-amber-pebble`**: Supabase Free Plan, $0, but connected to drive-home and injecting 16 unused env vars. Supabase pauses it after a week idle, and then every deploy fails in under a second with "Resource provisioning failed" (2026-10-13). The owner restored it on 2026-10-16; disconnected from drive-home on 2026-10-21; the 16 unused environment variables were removed with the connection.
-- **Old Supabase leaderboard project** (`mfsc…`): now read-only, retained only for identity transfers through 2026-11-21. New and migrated players use D1. No keep-alive job is configured; a pause can delay an unclaimed old identity but does not affect normal D1 play.
-- **Cloudflare Workers + D1:** Workers dashboard confirms Free is the current plan ($0). Free quotas: 100,000 Worker requests/day, 5 million D1 rows read/day, 100,000 rows written/day and 5 GB total database storage. API uses native D1 binding `DB`. Native per-IP counters reject excess requests before D1 work (300 reads/minute, 120 writes/minute; approximate per Cloudflare location). Account creation is separately limited to 20 per hashed IP/hour. Database `drive-home` imported 371 identities including one historical identity, and two best-score entries from three raw old scores. See `worker/README.md` for billing references and limits.
+- **Supabase (retired 2026-11-02):** both old projects are paused and unused, on Supabase's Free Plan ($0). The Vercel Marketplace store `supabase-amber-pebble` (the one whose pause made every deploy fail with "Resource provisioning failed" on 2026-10-13) was disconnected from drive-home on 2026-10-21, with its 16 unused environment variables. The old leaderboard project (`mfsc…`) is inactive. The owner may delete both (see "Owner to-dos").
+- **Cloudflare Workers + D1:** Workers dashboard confirms Free is the current plan ($0). Free quotas: 100,000 Worker requests/day, 5 million D1 rows read/day, 100,000 rows written/day and 5 GB total database storage. API uses native D1 binding `DB`. Native per-IP counters reject excess requests before D1 work (300 reads/minute, 120 writes/minute; approximate per Cloudflare location). Account creation is separately limited to 20 per hashed IP/hour. Neither Workers nor D1 pauses when idle. See `worker/README.md` for billing references and limits.
 - **GitHub**: no Actions workflows or LFS. The map and address services (Photon, Nominatim, OSRM demo, City of Edmonton, NRCan) are free and keyless; heavy use gets blocked, never billed. Keep local credentials, player-data backups and agent settings out of Git; `.gitignore` excludes them.
 
 ## Testing
@@ -235,7 +226,7 @@ The owner plays on an M2 MacBook Air (fanless; Retina screen at 2x plus an exter
 - **Keep the look**: before/after screenshots of the same spots must match. Pixel-diff full screenshots taken at the same resolution (set `__game.renderer.setPixelRatio(devicePixelRatio)` first in the new code).
 - Things that would break this: one mesh for a whole map (cut big things into ~500 m pieces), building or compiling during a race, `backdrop-filter` on HUD panels, writing the HUD every frame, adding or removing lights at run time.
 
-## Status and handoff (2026-10-18)
+## Status and handoff (2026-11-02)
 
 This section is the compressed history and the to-do list; delete items as they get done.
 
@@ -259,9 +250,8 @@ This section is the compressed history and the to-do list; delete items as they 
 
 ### Owner to-dos
 
-- After November 21, 2026, remove the three Worker `MIGRATION_*` secrets and retire the read-only old Supabase project when recovery has been checked.
-- The unused `supabase-amber-pebble` store was disconnected from drive-home on 2026-10-21; it no longer blocks deploys.
-- Glance at Vercel → Settings → Billing (should say Hobby) and Cloudflare → Workers plans (should say Free). Keep the old Supabase organisation on Free while it remains available for identity claims.
+- Optional, nothing uses them: delete the paused old Supabase project (supabase.com → the `mfsc…` project → Project Settings → General → Delete project) and remove the disconnected `supabase-amber-pebble` store in Vercel (Storage → supabase-amber-pebble).
+- Glance at Vercel → Settings → Billing (should say Hobby) and Cloudflare → Workers plans (should say Free).
 - `menu.png` and `race.png` in the project folder are old screenshots and can be deleted.
 - Confirm the teammates' car model years: the cars now follow the current designs (Lexus IS 2026+ facelift front, Kia Carnival 2025 facelift lights, Legacy 2025 black window frames, CR-V and Accord 2023+). An older car looks different at the front or rear.
 - Listen to the supercar engines (and the team cars) in `/sound-studio.html` and a drive: they're real recordings, but nobody has heard them yet.
@@ -313,6 +303,8 @@ The owner reported a double yellow appearing in the middle of a one-way road (91
   - A new map-select screen (route maps, stars, badges, rush-hour bar, rank).
   - 13 hand-made landmarks with HUD callouts.
 - **Oct 8:** landmark fixes (refinery follows the terrain, the Legislature terrace is off the road, callout sides fixed), then the road-line rewrite above, the road audit (to-do 1) and the sound request (to-do 2). The owner asked: approve before any deploy, and no co-author lines.
+- **Oct 21:** the leaderboard and player progress moved from Supabase to a Cloudflare Worker with D1; Vercel kept only `VITE_LEADERBOARD_API`.
+- **Nov 2:** Supabase retired: the account transfer closed early, the old test accounts deleted, the transfer code removed (see "Database").
 
 ### Landmark caveats (unverified details)
 

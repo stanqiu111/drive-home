@@ -157,10 +157,10 @@ Verify the exact deployed commit, rather than just the newest timestamp:
 ## 8. Recover, then learn
 
 Restore the last compatible working Vercel deployment or Worker version for
-the component that failed, then verify the live flow again. Avoid rolling the
-frontend back to a Supabase-dependent version while the old tables are
-read-only. Reverting Worker code does not revert D1 schema or restore deleted
-data; use the reviewed database recovery plan instead.
+the component that failed, then verify the live flow again. Never roll the
+frontend back to a Supabase-dependent version (before October 21, 2026):
+Supabase is retired. Reverting Worker code does not revert D1 schema or restore
+deleted data; use the reviewed database recovery plan instead.
 
 The person who landed the change normally fixes it. Add a meaningful
 regression check or update the review guidance for the failure that escaped.

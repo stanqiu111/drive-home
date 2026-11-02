@@ -1,7 +1,8 @@
 // Browser-scoped identity: only a hash of this random token is stored by D1.
 const API = (import.meta.env.VITE_LEADERBOARD_API || '').replace(/\/$/, '');
 const TOKEN_KEY = 'driveHome.onlineToken';
-const CLAIMED_KEY = 'driveHome.migratedPlayer';
+// Leftovers of the retired Supabase sign-in (transfer closed 2026-11-02): its session and the transfer marker.
+const RETIRED_KEYS = ['sb-mfscaxxnzscccbzfaofz-auth-token', 'driveHome.migratedPlayer'];
 export const onlineEnabled = Boolean(API);
 let token;
 
@@ -35,21 +36,7 @@ export async function onlineRequest(path, data) {
 }
 
 export async function connectPlayer() {
-  // Existing Supabase sessions stay on the device for rollback. No SDK is needed.
-  // Only inspect the project's exact old storage key, never another app's session.
-  const legacyKey = 'sb-mfscaxxnzscccbzfaofz-auth-token';
-  let legacy;
-  try { legacy = JSON.parse(localStorage.getItem(legacyKey) || 'null'); } catch { /* malformed old save */ }
-  if (legacy?.access_token && localStorage.getItem(CLAIMED_KEY) !== getToken()) {
-    try {
-      const row = await onlineRequest('/claim', { access_token: legacy.access_token, refresh_token: legacy.refresh_token });
-      localStorage.setItem(CLAIMED_KEY, getToken());
-      return row;
-    } catch (e) {
-      // Local achievements survive even when an old identity can no longer be
-      // verified. Keep transient service failures retryable on the next visit.
-      if (!['migration_closed', 'legacy_session_expired', 'legacy_player_unavailable'].includes(e.code)) throw e;
-    }
-  }
+  // Only this game's exact old keys, never another app's data.
+  try { for (const key of RETIRED_KEYS) localStorage.removeItem(key); } catch { /* storage unavailable */ }
   return onlineRequest('/session', {});
 }

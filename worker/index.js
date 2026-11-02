@@ -65,34 +65,6 @@ function playerJSON(row) {
   return { id: row.id, name: row.name, stats: JSON.parse(row.stats), achievements: JSON.parse(row.achievements) };
 }
 
-// Only used during the migration window. The old service verifies ownership;
-// a user-supplied name or UUID is never accepted as proof of identity.
-async function claimLegacy(env, credentials, tokenHash) {
-  const deadline = Date.parse(env.MIGRATION_DEADLINE);
-  if (!env.MIGRATION_SUPABASE_URL || !env.MIGRATION_SUPABASE_KEY || !Number.isFinite(deadline) || Date.now() >= deadline) fail(410, 'migration_closed');
-  const base = env.MIGRATION_SUPABASE_URL;
-  const headers = { apikey: env.MIGRATION_SUPABASE_KEY };
-  let access = credentials?.access_token;
-  if (typeof access !== 'string' || access.length > 5000) fail(400, 'invalid_legacy_session');
-  let response = await fetch(`${base}/auth/v1/user`, { headers: { ...headers, Authorization: `Bearer ${access}` }, signal: AbortSignal.timeout(4000) });
-  if ([401, 403].includes(response.status) && typeof credentials.refresh_token === 'string' && credentials.refresh_token.length < 2000) {
-    const refreshed = await fetch(`${base}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: credentials.refresh_token }),
-      signal: AbortSignal.timeout(4000),
-    });
-    if (refreshed.status >= 500 || refreshed.status === 429) fail(503, 'legacy_service_unavailable');
-    if (!refreshed.ok) fail(401, 'legacy_session_expired');
-    access = (await refreshed.json()).access_token;
-    response = await fetch(`${base}/auth/v1/user`, { headers: { ...headers, Authorization: `Bearer ${access}` }, signal: AbortSignal.timeout(4000) });
-  }
-  if (response.status >= 500 || response.status === 429) fail(503, 'legacy_service_unavailable');
-  if (!response.ok) fail(401, 'legacy_session_expired');
-  const user = await response.json();
-  const result = await env.DB.prepare('UPDATE players SET token_hash = ? WHERE id = ? AND token_hash IS NULL RETURNING id').bind(tokenHash, user.id).first();
-  if (!result) fail(409, 'legacy_player_unavailable');
-}
-
 async function route(request, env) {
   const url = new URL(request.url);
   const db = env.DB;
@@ -119,6 +91,9 @@ async function route(request, env) {
   if (!['/session', '/claim', '/name', '/progress', '/scores'].includes(url.pathname)) fail(404, 'not_found');
   const token = request.headers.get('Authorization')?.replace(/^Bearer /, '');
   if (!TOKEN.test(token ?? '')) fail(401, 'invalid_token');
+  // The Supabase account transfer closed on 2026-11-02. Older game pages still ask
+  // once; this answer sends them on to /session as a new player.
+  if (url.pathname === '/claim') fail(410, 'migration_closed');
   const tokenHash = await hash(token);
   const data = await body(request);
   if (url.pathname === '/session') {
@@ -130,12 +105,6 @@ async function route(request, env) {
       row = await player(db, tokenHash);
     }
     return json(playerJSON(row));
-  }
-  if (url.pathname === '/claim') {
-    const existing = await db.prepare('SELECT * FROM players WHERE token_hash = ?').bind(tokenHash).first();
-    if (existing) return json(playerJSON(existing));
-    await claimLegacy(env, data, tokenHash);
-    return json(playerJSON(await player(db, tokenHash)));
   }
   const row = await player(db, tokenHash);
   if (url.pathname === '/name') {

@@ -82,36 +82,36 @@ test('rejects malformed input, oversized bodies and untrusted origins', async ()
   assert.equal((await call('/health')).headers.get('Access-Control-Allow-Origin'), origin);
 });
 
-test('legacy migration cannot be claimed by UUID or after its window closes', async () => {
-  assert.equal((await call('/claim', { id: 'anything' }, 'c'.repeat(64))).status, 410);
-});
-
-test('legacy claim verifies ownership, preserves records and is safe to retry', async () => {
+test('the closed Supabase transfer never contacts the old service or hands over an old account', async () => {
   const id = 'old-player';
   await db.prepare('INSERT INTO players(id,name,name_key,stats) VALUES (?,?,?,?)').bind(id, 'Original', 'original', '{"trips":9}').run();
-  await db.prepare('INSERT INTO scores(player_id,map,car,time_ms,crashes) VALUES (?,?,?,?,?)').bind(id, 'home', 'legacy', 80000, 0).run();
+  // Leftover transfer settings must not reopen it.
   const env = { DB: db, READ_LIMITER: allowLimiter, WRITE_LIMITER: allowLimiter, ALLOWED_ORIGINS: origin, MIGRATION_SUPABASE_URL: 'https://old.example', MIGRATION_SUPABASE_KEY: 'test-public-key', MIGRATION_DEADLINE: '2099-01-01T00:00:00Z' };
   const originalFetch = globalThis.fetch;
   let calls = 0;
-  globalThis.fetch = async (url, init) => {
-    calls++;
-    assert.equal(url, 'https://old.example/auth/v1/user');
-    assert.equal(init.headers.Authorization, 'Bearer valid-old-session');
-    return Response.json({ id });
-  };
+  globalThis.fetch = async () => { calls++; return Response.json({ id }); };
+  const token = 'd'.repeat(64);
+  const request = (path) => new Request(`http://localhost${path}`, { method: 'POST', headers: {
+    Origin: origin, 'Content-Type': 'application/json', Authorization: `Bearer ${token}`,
+  }, body: JSON.stringify({ access_token: 'valid-old-session', refresh_token: 'old-refresh', id }) });
   try {
-    const request = () => new Request('http://localhost/claim', { method: 'POST', headers: {
-      Origin: origin, 'Content-Type': 'application/json', Authorization: `Bearer ${'d'.repeat(64)}`,
-    }, body: JSON.stringify({ access_token: 'valid-old-session', id: 'someone-else' }) });
-    const claimed = await worker.fetch(request(), env);
-    assert.equal(claimed.status, 200);
-    const result = await claimed.json();
-    assert.equal(result.id, id); assert.equal(result.name, 'Original'); assert.equal(result.stats.trips, 9);
-    assert.equal((await worker.fetch(request(), env)).status, 200);
-    assert.equal(calls, 1);
-    assert.equal((await db.prepare('SELECT count(*) n FROM scores WHERE player_id=?').bind(id).first()).n, 1);
-    assert.equal((await db.prepare('SELECT count(*) n FROM players WHERE token_hash=?').bind('d'.repeat(64)).first()).n, 0);
+    const claim = await worker.fetch(request('/claim'), env);
+    assert.equal(claim.status, 410);
+    assert.equal((await claim.json()).error, 'migration_closed');
+    assert.equal(claim.headers.get('Access-Control-Allow-Origin'), origin);
+    assert.equal(calls, 0);
+    assert.equal((await db.prepare('SELECT token_hash FROM players WHERE id=?').bind(id).first()).token_hash, null);
   } finally { globalThis.fetch = originalFetch; }
+  // An older game page then signs in as a new player.
+  const fresh = await call('/session', {}, token);
+  assert.equal(fresh.status, 200);
+  assert.notEqual(fresh.body.id, id); assert.equal(fresh.body.name, null); assert.equal(fresh.body.stats.trips, undefined);
+  // A signed-in player is refused the same way and keeps their account.
+  const before = (await call('/session', {})).body.id;
+  assert.equal((await call('/claim', { access_token: 'x' })).status, 410);
+  assert.equal((await call('/claim', { id: 'anything' }, 'c'.repeat(64))).status, 410);
+  assert.equal((await call('/session', {})).body.id, before);
+  assert.equal((await call('/claim', {}, 'not-a-token')).status, 401);
 });
 
 test('new browser identities are rate limited', async () => {
@@ -121,35 +121,6 @@ test('new browser identities are rate limited', async () => {
     if (response.status === 429) limited = true;
   }
   assert.equal(limited, true);
-});
-
-test('expired legacy sessions refresh on 403; an outage does not discard identity', async () => {
-  const env = { DB: db, READ_LIMITER: allowLimiter, WRITE_LIMITER: allowLimiter, ALLOWED_ORIGINS: origin, MIGRATION_SUPABASE_URL: 'https://old.example', MIGRATION_SUPABASE_KEY: 'public-test', MIGRATION_DEADLINE: '2099-01-01T00:00:00Z' };
-  await db.prepare('INSERT INTO players(id) VALUES (?)').bind('expired-player').run();
-  const originalFetch = globalThis.fetch;
-  let calls = 0;
-  globalThis.fetch = async (url, init) => {
-    calls++;
-    if (calls === 1) return Response.json({ code: 'bad_jwt' }, { status: 403 });
-    if (calls === 2) {
-      assert.equal(url, 'https://old.example/auth/v1/token?grant_type=refresh_token');
-      assert.equal(JSON.parse(init.body).refresh_token, 'refresh-proof');
-      return Response.json({ access_token: 'fresh-proof' });
-    }
-    assert.equal(init.headers.Authorization, 'Bearer fresh-proof');
-    return Response.json({ id: 'expired-player' });
-  };
-  const request = (token) => new Request('http://localhost/claim', { method: 'POST', headers: {
-    Origin: origin, 'Content-Type': 'application/json', Authorization: `Bearer ${token.repeat(64)}`,
-  }, body: JSON.stringify({ access_token: 'expired-proof', refresh_token: 'refresh-proof' }) });
-  try {
-    assert.equal((await worker.fetch(request('e'), env)).status, 200);
-    assert.equal(calls, 3);
-    globalThis.fetch = async () => Response.json({}, { status: 503 });
-    const unavailable = await worker.fetch(request('f'), env);
-    assert.equal(unavailable.status, 503);
-    assert.equal((await unavailable.json()).error, 'legacy_service_unavailable');
-  } finally { globalThis.fetch = originalFetch; }
 });
 
 test('read and write floods are rejected without database queries', async () => {

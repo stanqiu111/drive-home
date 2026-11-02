@@ -66,7 +66,7 @@ npm run dev
 
 The example points to the local API, whose database is separate from production. For a deployed backend, set `VITE_LEADERBOARD_API` to your Worker URL and allow the game's exact origin in the Worker configuration. Restart Vite after changing `.env.local`.
 
-The backend uses a small Cloudflare D1 database. There is no database password or Supabase SDK in the game. See [the backend setup and migration guide](worker/README.md) for deployment and existing-player migration.
+The backend uses a small Cloudflare D1 database. There is no database password in the game. See [the backend guide](worker/README.md) for deployment and recovery.
 
 Other commands:
 
@@ -81,7 +81,7 @@ Developer pages, on the dev server: `/car-studio.html?id=crv` (one car from six 
 
 ## How it's made
 
-Plain JavaScript and [Three.js](https://threejs.org), built with [Vite](https://vite.dev). No framework. Hosting and the leaderboard use free plans; the map and address services need no API keys. Cloudflare deployment requires account sign-in, and temporary migration credentials stay on the server.
+Plain JavaScript and [Three.js](https://threejs.org), built with [Vite](https://vite.dev). No framework. Hosting and the leaderboard use free plans; the map and address services need no API keys. Cloudflare deployment requires account sign-in.
 
 The maps are built ahead of time by `node tools/build-maps.mjs` into `public/maps/`, from free open data:
 
@@ -98,7 +98,6 @@ Custom routes run the same map builder (`src/mapgen/`) inside the browser, so th
 | `public/` | Built maps, OpenStreetMap tiles, sounds |
 | `tools/` | Map and sound builders, the road-line check, test scripts in `tools/dev/` |
 | `worker/` | Cloudflare leaderboard API, D1 schema and backend tests |
-| `supabase/schema.sql` | Historical Supabase schema, retained for migration and rollback |
 
 [`CLAUDE.md`](CLAUDE.md) has the full project notes: how every part works, the rules that keep road lines and bridges right, how to add a map, car, landmark, brand or sound, testing and performance targets, and the to-do list.
 
@@ -106,7 +105,7 @@ Custom routes run the same map builder (`src/mapgen/`) inside the browser, so th
 
 Follow [the shipping workflow](docs/SHIPPING.md) for branches, verification, pull requests, owner approval, deployment and recovery.
 
-The game is served as static files on Vercel Hobby. The leaderboard API runs on Cloudflare Workers and D1. Existing anonymous Supabase players can transfer their identity before **November 21, 2026 at 00:00 UTC**; new and transferred players use D1 only. The old Supabase authentication service is needed only for these temporary identity claims. See [the backend guide](worker/README.md) for deployment, migration cleanup and recovery.
+The game is served as static files on Vercel Hobby. The leaderboard API runs on Cloudflare Workers and D1. The game used Supabase until October 21, 2026; that service is retired and nothing uses it. See [the backend guide](worker/README.md) for deployment and recovery.
 
 Pushing to `main` on GitHub deploys the live game automatically, so work in progress goes on a branch and goes to `main` only once it has been checked and the owner has approved deployment. Worker changes require a separate Wrangler deployment.
 

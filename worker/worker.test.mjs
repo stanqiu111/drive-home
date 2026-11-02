@@ -102,6 +102,15 @@ test('the closed Supabase transfer never contacts the old service or hands over 
     assert.equal(calls, 0);
     assert.equal((await db.prepare('SELECT token_hash FROM players WHERE id=?').bind(id).first()).token_hash, null);
   } finally { globalThis.fetch = originalFetch; }
+  // The stub reads no body and touches no data: a database that throws and a body the parser would reject.
+  let queries = 0;
+  const noDb = { ...env, DB: { prepare() { queries++; throw new Error('Database must not be reached'); } } };
+  const junk = await worker.fetch(new Request('http://localhost/claim', { method: 'POST', headers: {
+    Origin: origin, 'Content-Type': 'text/plain', Authorization: `Bearer ${token}`,
+  }, body: 'x'.repeat(20000) }), noDb);
+  assert.equal(junk.status, 410);
+  assert.equal((await junk.json()).error, 'migration_closed');
+  assert.equal(queries, 0);
   // An older game page then signs in as a new player.
   const fresh = await call('/session', {}, token);
   assert.equal(fresh.status, 200);

@@ -41,8 +41,15 @@ A dry run validates packaging, not remote behavior. After deploying, check `/hea
 
 ## Recovery
 
-- Worker code: `npx wrangler rollback --config worker/wrangler.jsonc` restores the previous version. It does not change database contents.
-- Database: D1 Time Travel restores to a point in time (`npx wrangler d1 time-travel info drive-home --config worker/wrangler.jsonc` shows the current bookmark; record it before any data change). For a full copy, `npx wrangler d1 export drive-home --remote --config worker/wrangler.jsonc --output backups/<name>.sql`. Before deleting data, export it and check the copy restores by loading it into a throwaway local database (`wrangler d1 execute --local --persist-to <temp dir> --file ...`) and comparing counts.
+- Worker code: `npx wrangler rollback --config worker/wrangler.jsonc` restores the previous version. It does not change database contents. Don't roll back to a version from before November 2, 2026: those still carry the closed transfer's settings.
+- Database: D1 Time Travel restores to a point in time (`npx wrangler d1 time-travel info drive-home --config worker/wrangler.jsonc` shows the current bookmark; record it before any data change; `npx wrangler d1 time-travel restore drive-home --bookmark=<bookmark> --config worker/wrangler.jsonc` goes back to it). On Workers Free it reaches back only 7 days, so it is a short-term undo; an export is the long-term copy: `npx wrangler d1 export drive-home --remote --config worker/wrangler.jsonc --output backups/<name>.sql`.
+- Before deleting data, export it and check the copy restores into a throwaway local database, then compare counts with the live one:
+
+  ```sh
+  npx wrangler d1 execute drive-home --local --persist-to <temp dir> --config worker/wrangler.jsonc --file backups/<name>.sql
+  npx wrangler d1 execute drive-home --local --persist-to <temp dir> --config worker/wrangler.jsonc --command "SELECT count(*) FROM players"
+  npx wrangler d1 execute drive-home --remote --config worker/wrangler.jsonc --command "SELECT count(*) FROM players"
+  ```
 - Private exports, snapshots and generated SQL belong in ignored `backups/`. Never commit them.
 
 ## Operations
@@ -59,4 +66,4 @@ Official references: [Vercel Hobby](https://vercel.com/docs/plans/hobby), [Worke
 
 - **Until October 21, 2026** the game used Supabase (anonymous sign-in, Postgres tables and a leaderboard view).
 - **October 21, 2026:** cutover to this Worker and D1, approved by the owner. The old tables were made read-only and their final snapshot imported: 370 player rows and three raw scores became 371 D1 identities (one historical identity for scores without an account) and two best-score entries. Old browsers could transfer their identity by sending their Supabase session to `/claim`, which the Worker verified with Supabase's authentication service. Vercel kept only `VITE_LEADERBOARD_API`, and the unused `supabase-amber-pebble` Vercel store was disconnected.
-- **November 2, 2026:** Supabase retired, with the owner's approval. Supabase had paused the old project for inactivity, so transfers could no longer succeed. The transfer was closed early (the three `MIGRATION_*` Worker secrets were removed) and the 370 never-transferred accounts, all test users including "TestBot" and "lololololol", were deleted with their two scores, leaving 13 players and one score. A full export was taken first (`backups/d1-before-supabase-retirement-2026-11-02.sql`, restore checked locally) and the Time Travel bookmark before the change was `00000015-00000000-00005117-815a52fe3939c5fc63f871e45c03f816`. The transfer code and the importer were removed afterwards; `/claim` stays as the closed stub above.
+- **November 2, 2026:** Supabase retired, with the owner's approval. Supabase had paused the old project for inactivity, so transfers could no longer succeed. The transfer was closed early (the three `MIGRATION_*` Worker secrets were removed) and the 370 never-transferred accounts, all test users including "TestBot" and "lololololol", were deleted with their two scores, leaving 13 players and one score. A full export was taken first (`backups/d1-before-supabase-retirement-2026-11-02.sql`, restore checked locally) and the Time Travel bookmark before the change was `00000015-00000000-00005117-815a52fe3939c5fc63f871e45c03f816` (usable until about November 9, 2026; after that only the export can bring the rows back). The transfer code and the importer were removed afterwards; `/claim` stays as the closed stub above.

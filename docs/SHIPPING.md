@@ -129,8 +129,8 @@ review or approval applies to the version reviewed; later changes need review.
   does not deploy the Worker.
 - D1 schema and data changes require a separate reviewed migration plan.
   Prefer additive, backward-compatible changes; back up data privately and
-  verify recovery before destructive changes. Do not rerun cutover imports
-  against active players; see the backend guide.
+  verify recovery before destructive changes, following the Recovery section
+  of the backend guide.
 - Environment changes may require a new build. Never put server secrets in
   `VITE_*`, Git, command arguments, or logs.
 - Keep Vercel Hobby and Cloudflare Workers Free. Do not enable paid plans,
